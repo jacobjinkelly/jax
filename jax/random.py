@@ -163,17 +163,20 @@ def _split(key, num):
   return lax.reshape(threefry_2x32(key, counts), (num, 2))
 
 
+@custom_transforms
 def fold_in(key, data):
   """Folds in data to a PRNG key to form a new PRNG key.
 
   Args:
     key: a PRNGKey (an array with shape (2,) and dtype uint32).
-    data: a 32bit integer representing data to be folded in to the key.
+    data: data to be folded into the key; will be hashed first if not an int.
 
   Returns:
     A new PRNGKey that is a deterministic function of the inputs and is
     statistically safe for producing a stream of new pseudo-random values.
   """
+  if not isinstance(data, int): # TODO do better
+    data = hash(data)
   return _fold_in(key, data)
 
 @jit
@@ -212,6 +215,7 @@ def _check_shape(name, shape):
     raise ValueError(msg.format(name, shape))
 
 
+@custom_transforms
 def uniform(key, shape=(), dtype=onp.float64, minval=0., maxval=1.):
   """Sample uniform random values in [minval, maxval) with given shape/dtype.
 
