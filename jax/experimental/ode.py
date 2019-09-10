@@ -28,6 +28,9 @@ import functools
 import time
 
 import jax
+from jax.experimental import stax
+from jax.experimental.stax import Dense, Relu, LogSoftmax
+from jax import random
 from jax.config import config
 from jax.flatten_util import ravel_pytree
 import jax.lax
@@ -360,18 +363,36 @@ def test_grad_odeint():
             g[i] = (f(unravel(flat_x + d)) - f(unravel(flat_x - d))) / (2.0 * eps)
         return g
 
-    def f(y, t, arg1, arg2):
-        return -np.sqrt(t) - y + arg1 - np.mean((y + arg2) ** 2)
-
     def onearg_odeint(args):
         return np.sum(
             odeint(f, args[2], args[0], args[1], atol=1e-8, rtol=1e-8))
 
-    dim = 10
+    rng = random.PRNGKey(0)
+    init_random_params, predict = stax.serial(
+        Dense(4), Relu,
+        Dense(4), Relu,
+        Dense(2), LogSoftmax
+    )
+
+    output_shape, init_params = init_random_params(rng, (-1, 2))
+    assert output_shape == (-1, 2)
+
+    dim = 2
     t0 = 0.1
     t1 = 0.2
     y0 = np.linspace(0.1, 0.9, dim)
-    fargs = (0.1, 0.2)
+    flat_params, params_unravel = ravel_pytree(init_params)
+    fargs = flat_params
+
+    def f(y, t, *args):
+        """
+        Simple MLP.
+        """
+        # convert args from Tuple to DeviceArray
+        args, _ = ravel_pytree(args)
+        # convert params to format for predict()
+        params = params_unravel(args)
+        return predict(params, y)
 
     numerical_grad = nd(onearg_odeint, (y0, np.array([t0, t1]), fargs))
     ys = odeint(f, fargs, y0, np.array([t0, t1]), atol=1e-8, rtol=1e-8)
@@ -379,7 +400,7 @@ def test_grad_odeint():
     g = np.ones_like(ys)
     exact_grad, _ = ravel_pytree(ode_vjp(g, ys, np.array([t0, t1])))
 
-    assert np.allclose(numerical_grad, exact_grad)
+    assert np.allclose(numerical_grad, exact_grad, atol=1e-6)
 
 
 def plot_gradient_field(ax, func, xlimits, ylimits, numticks=30):
