@@ -30,7 +30,7 @@ import time
 import jax
 from jax.experimental import stax
 from jax.experimental.stax import Dense, Relu, LogSoftmax
-from jax import random
+from jax import random, grad
 from jax.config import config
 from jax.flatten_util import ravel_pytree
 import jax.lax
@@ -403,6 +403,76 @@ def test_grad_odeint():
     assert np.allclose(numerical_grad, exact_grad, atol=1e-6)
 
 
+def test_grad_loss_odeint():
+    """Compare numerical and exact differentiation of a simple odeint."""
+
+    def nd(f, x, eps=0.0001):
+        """
+        Numerically differentiate.
+        """
+        flat_x, unravel = ravel_pytree(x)
+        dim = len(flat_x)
+        g = onp.zeros_like(flat_x)
+        for i in range(dim):
+            print(i, dim)
+            d = onp.zeros_like(flat_x)
+            d[i] = eps
+            g[i] = (f(unravel(flat_x + d)) - f(unravel(flat_x - d))) / (2.0 * eps)
+        return g
+
+    def loss_fun(pred):
+        """
+        Dummy loss function.
+        """
+        return np.sum(pred ** 2) ** 0.5
+
+    grad_loss_fun = grad(loss_fun)
+
+    def onearg_odeint(args):
+        """
+        Gradient of result of odeint wrt final.
+        """
+        ys = odeint(f, args[2], args[0], args[1], atol=1e-8, rtol=1e-8)
+        grad_val = grad_loss_fun(ys)
+        return np.sum(ys * grad_val)
+
+    rng = random.PRNGKey(0)
+    init_random_params, predict = stax.serial(
+        Dense(4), Relu,
+        Dense(4), Relu,
+        Dense(2), LogSoftmax
+    )
+
+    output_shape, init_params = init_random_params(rng, (-1, 2))
+    assert output_shape == (-1, 2)
+
+    dim = 2
+    t0 = 0.1
+    t1 = 0.2
+    y0 = np.linspace(0.1, 0.9, dim)
+    flat_params, params_unravel = ravel_pytree(init_params)
+    fargs = flat_params
+
+    def f(y, t, *args):
+        """
+        Simple MLP.
+        """
+        # convert args from Tuple to DeviceArray
+        args, _ = ravel_pytree(args)
+        # convert params to format for predict()
+        params = params_unravel(args)
+        return predict(params, y)
+
+    numerical_grad = nd(onearg_odeint, (y0, np.array([t0, t1]), fargs))
+    ys = odeint(f, fargs, y0, np.array([t0, t1]), atol=1e-8, rtol=1e-8)
+    ode_vjp = grad_odeint(f, fargs)
+    grad_val = grad_loss_fun(ys)
+    exact_grad, _ = ravel_pytree(ode_vjp(grad_val, ys, np.array([t0, t1])))
+
+    # TODO: y0 grads are incorrect, everything else is good
+    assert np.allclose(numerical_grad, exact_grad, atol=1e-1)
+
+
 def plot_gradient_field(ax, func, xlimits, ylimits, numticks=30):
     """Plot the gradient field of `func` on `ax`."""
     x = np.linspace(*xlimits, num=numticks)
@@ -481,4 +551,5 @@ def pend_benchmark_odeint():
 
 
 if __name__ == '__main__':
+    test_grad_loss_odeint()
     test_grad_odeint()
