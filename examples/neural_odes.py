@@ -67,6 +67,8 @@ if __name__ == "__main__":
 
     ii = 0
 
+    NFE_COUNT = [0]
+
     # set up MLP
     init_random_params, predict = stax.serial(
         Dense(50), Tanh,
@@ -111,6 +113,8 @@ if __name__ == "__main__":
         """
         Augmented dynamics to implement regularization.
         """
+        NFE_COUNT[0] += 1
+
         flat_params = args
         # convert flat_params from Tuple to DeviceArray, then ravel
         flat_params, _ = ravel_pytree(flat_params)
@@ -147,14 +151,21 @@ if __name__ == "__main__":
         r0 = np.zeros((args.batch_size, 1))
         batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
         flat_batch_y0_r0, _ = ravel_pytree(batch_y0_r0)
+
+        # integrate ODE and count NFE
+        NFE_COUNT[0] = 0
         pred_y_r = odeint(reg_dynamics, fargs, flat_batch_y0_r0, batch_t, atol=1e-8, rtol=1e-8)
+        print("forward NFE: %d" % NFE_COUNT[0])
 
         _, ravel_pred_y_r = ravel_pytree(pred_y_r)
 
         ode_vjp = grad_odeint(reg_dynamics, fargs)
         loss_grad = grad_loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
 
+        # integrate adjoint ODE and count NFE
+        NFE_COUNT[0] = 0
         total_grad = ode_vjp(ravel_pred_y_r(loss_grad), pred_y_r, batch_t)
+        print("backward NFE: %d" % NFE_COUNT[0])
 
         params_grad = total_grad[3]
         fargs -= args.lr * params_grad
