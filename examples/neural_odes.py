@@ -7,6 +7,8 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
+import time
+
 from jax.experimental import stax
 from jax.experimental.stax import Dense, Tanh
 from jax.experimental.ode import odeint, grad_odeint
@@ -148,9 +150,11 @@ if __name__ == "__main__":
         """
         return np.mean(np.abs(pred - target))
 
+    ode_vjp = grad_odeint(reg_dynamics, fargs)
     grad_loss_fun = grad(loss_fun)
 
     for itr in range(1, args.niters + 1):
+        time0 = time.time()
         batch_y0, batch_t, batch_y = get_batch()
         r0 = np.zeros((args.batch_size, 1))
         batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
@@ -163,7 +167,6 @@ if __name__ == "__main__":
 
         _, ravel_pred_y_r = ravel_pytree(pred_y_r)
 
-        ode_vjp = grad_odeint(reg_dynamics, fargs)
         loss_grad = grad_loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
 
         # integrate adjoint ODE and count NFE
@@ -180,3 +183,5 @@ if __name__ == "__main__":
             loss = loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
             print('Iter {:04d} | Total Loss {:.6f} | Error {:.6f}'.format(itr, loss, error))
             ii += 1
+
+        print(time.time() - time0)
