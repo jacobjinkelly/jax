@@ -152,7 +152,7 @@ if __name__ == "__main__":
     ode_vjp = grad_odeint(reg_dynamics, fargs)
     grad_loss_fun = grad(loss_fun)
 
-    for itr in range(1, args.niters + 1):   
+    for itr in range(1, args.niters + 1):
         batch_y0, batch_t, batch_y = get_batch()
         r0 = np.zeros((args.batch_size, 1))
         batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
