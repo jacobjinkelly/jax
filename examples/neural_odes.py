@@ -46,7 +46,6 @@ def true_func(y, t):
     return np.matmul(y ** 3, true_A)
 
 
-# TODO: no grad?
 true_y = odeint(true_func, (), true_y0, t, atol=1e-8, rtol=1e-8)
 
 
@@ -123,7 +122,6 @@ if __name__ == "__main__":
 
         # separate out state from augmented
         y_r = ravel_batch_y0_r0(y_r)
-        # TODO: do we need to use jax.index here?
         y, r = y_r[:, :2], y_r[:, 2]
 
         predictions = predict(params, y ** 3)
@@ -142,7 +140,6 @@ if __name__ == "__main__":
         Loss function.
         """
         pred, reg = pred_y_r[:, :, :2], pred_y_r[:, :, 2]
-        # TODO: not making a silly math mistake here right?
         return np.mean(np.abs(pred - target)) + args.lam * np.mean(reg)
 
     def error_fun(pred, target):
