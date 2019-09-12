@@ -54,8 +54,9 @@ def get_batch():
     """
     Get batch.
     """
-    # TODO: different batch each time?
-    _, subkey = random.split(key)
+    global key
+    new_key, subkey = random.split(key)
+    key = new_key
     s = random.shuffle(subkey, np.arange(args.data_size - args.batch_time, dtype=np.int64))[:args.batch_size]
     batch_y0 = true_y[s]  # (M, D)
     batch_t = t[:args.batch_time]  # (T)
@@ -144,6 +145,12 @@ if __name__ == "__main__":
         # TODO: not making a silly math mistake here right?
         return np.mean(np.abs(pred - target)) + args.lam * np.mean(reg)
 
+    def error_fun(pred, target):
+        """
+        Mean absolute error.
+        """
+        return np.mean(np.abs(pred - target))
+
     grad_loss_fun = grad(loss_fun)
 
     for itr in range(1, args.niters + 1):
@@ -172,6 +179,7 @@ if __name__ == "__main__":
 
         if itr % args.test_freq == 0:
             pred_y = ravel_batch_y_r(pred_y_r)[:, :, :2]
-            loss = loss_fun(ravel_batch_y(pred_y), batch_y)
-            print('Iter {:04d} | Total Loss {:.6f}'.format(itr, loss))
+            error = error_fun(ravel_batch_y(pred_y), batch_y)
+            loss = loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
+            print('Iter {:04d} | Total Loss {:.6f} | Error {:.6f}'.format(itr, loss, error))
             ii += 1
