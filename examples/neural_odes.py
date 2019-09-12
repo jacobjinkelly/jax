@@ -7,7 +7,6 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
-import time
 
 from jax.experimental import stax
 from jax.experimental.stax import Dense, Tanh
@@ -25,7 +24,7 @@ parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--niters', type=int, default=2000)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--lam', type=float, default=1)
-parser.add_argument('--test_freq', type=int, default=1)
+parser.add_argument('--test_freq', type=int, default=20)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -153,8 +152,7 @@ if __name__ == "__main__":
     ode_vjp = grad_odeint(reg_dynamics, fargs)
     grad_loss_fun = grad(loss_fun)
 
-    for itr in range(1, args.niters + 1):
-        time0 = time.time()
+    for itr in range(1, args.niters + 1):   
         batch_y0, batch_t, batch_y = get_batch()
         r0 = np.zeros((args.batch_size, 1))
         batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
@@ -183,5 +181,3 @@ if __name__ == "__main__":
             loss = loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
             print('Iter {:04d} | Total Loss {:.6f} | Error {:.6f}'.format(itr, loss, error))
             ii += 1
-
-        print(time.time() - time0)
