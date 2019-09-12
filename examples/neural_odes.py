@@ -21,14 +21,15 @@ parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=2000)
+parser.add_argument('--niters', type=int, default=20)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--lam', type=float, default=1)
+parser.add_argument('--reg', type=str, choices=['none', 'weight', 'state', 'dynamics'], default='none')
 parser.add_argument('--test_freq', type=int, default=20)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
-args = parser.parse_args()
+parse_args = parser.parse_args()
 
 
 config.update('jax_enable_x64', True)
@@ -36,7 +37,7 @@ config.update('jax_enable_x64', True)
 key = random.PRNGKey(0)
 
 true_y0 = np.array([2., 0.])  # (D,)
-t = np.linspace(0., 25., args.data_size)
+t = np.linspace(0., 25., parse_args.data_size)
 true_A = np.array([[-0.1, 2.0], [-2.0, -0.1]])
 
 
@@ -57,10 +58,10 @@ def get_batch():
     global key
     new_key, subkey = random.split(key)
     key = new_key
-    s = random.shuffle(subkey, np.arange(args.data_size - args.batch_time, dtype=np.int64))[:args.batch_size]
+    s = random.shuffle(subkey, np.arange(parse_args.data_size - parse_args.batch_time, dtype=np.int64))[:parse_args.batch_size]
     batch_y0 = true_y[s]  # (M, D)
-    batch_t = t[:args.batch_time]  # (T)
-    batch_y = np.stack([true_y[s + i] for i in range(args.batch_time)], axis=0)  # (T, M, D)
+    batch_t = t[:parse_args.batch_time]  # (T)
+    batch_y = np.stack([true_y[s + i] for i in range(parse_args.batch_time)], axis=0)  # (T, M, D)
     return batch_y0, batch_t, batch_y
 
 
@@ -82,13 +83,13 @@ if __name__ == "__main__":
     flat_params, ravel_params = ravel_pytree(init_params)
     batch_y0, _, batch_y = get_batch()
 
-    r0 = np.zeros((args.batch_size, 1))
+    r0 = np.zeros((parse_args.batch_size, 1))
     batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
     _, ravel_batch_y0_r0 = ravel_pytree(batch_y0_r0)
 
     _, ravel_batch_y0 = ravel_pytree(batch_y0)
 
-    r = np.zeros((args.batch_time, args.batch_size, 1))
+    r = np.zeros((parse_args.batch_time, parse_args.batch_size, 1))
     batch_y_r = np.concatenate((batch_y, r), axis=2)
     _, ravel_batch_y_r = ravel_pytree(batch_y_r)
 
@@ -126,10 +127,13 @@ if __name__ == "__main__":
         y, r = y_r[:, :2], y_r[:, 2]
 
         predictions = predict(params, y ** 3)
-        # STATE
-        regularization = np.sum(y ** 2, axis=1) ** 0.5
-        # DYNAMICS
-        regularization = np.sum(predictions ** 2, axis=1) ** 0.5
+
+        if parse_args.reg == "state":
+            regularization = np.sum(y ** 2, axis=1) ** 0.5
+        elif parse_args.reg == "dynamics":
+            regularization = np.sum(predictions ** 2, axis=1) ** 0.5
+        else:
+            regularization = np.zeros(parse_args.batch_size)
 
         regularization = np.expand_dims(regularization, axis=1)
         pred_reg = np.concatenate((predictions, regularization), axis=1)
@@ -141,7 +145,7 @@ if __name__ == "__main__":
         Loss function.
         """
         pred, reg = pred_y_r[:, :, :2], pred_y_r[:, :, 2]
-        return np.mean(np.abs(pred - target)) + args.lam * np.mean(reg)
+        return np.mean(np.abs(pred - target)) + parse_args.lam * np.mean(reg)
 
     def error_fun(pred, target):
         """
@@ -152,9 +156,9 @@ if __name__ == "__main__":
     ode_vjp = grad_odeint(reg_dynamics, fargs)
     grad_loss_fun = grad(loss_fun)
 
-    for itr in range(1, args.niters + 1):
+    for itr in range(1, parse_args.niters + 1):
         batch_y0, batch_t, batch_y = get_batch()
-        r0 = np.zeros((args.batch_size, 1))
+        r0 = np.zeros((parse_args.batch_size, 1))
         batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
         flat_batch_y0_r0, _ = ravel_pytree(batch_y0_r0)
 
@@ -173,9 +177,9 @@ if __name__ == "__main__":
         print("backward NFE: %d" % NFE_COUNT[0])
 
         params_grad = total_grad[3]
-        fargs -= args.lr * params_grad
+        fargs -= parse_args.lr * params_grad
 
-        if itr % args.test_freq == 0:
+        if itr % parse_args.test_freq == 0:
             pred_y = ravel_batch_y_r(pred_y_r)[:, :, :2]
             error = error_fun(ravel_batch_y(pred_y), batch_y)
             loss = loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
