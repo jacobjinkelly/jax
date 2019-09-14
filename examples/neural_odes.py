@@ -48,7 +48,7 @@ def true_func(y, t):
     return np.matmul(y ** 3, true_A)
 
 
-true_y = odeint(true_func, (), true_y0, t, atol=1e-8, rtol=1e-8)
+true_y, _ = odeint(true_func, (), true_y0, t, atol=1e-8, rtol=1e-8)
 
 
 def get_batch():
@@ -68,8 +68,6 @@ def get_batch():
 if __name__ == "__main__":
 
     ii = 0
-
-    NFE_COUNT = [0]
 
     # set up MLP
     init_random_params, predict = stax.serial(
@@ -115,7 +113,6 @@ if __name__ == "__main__":
         """
         Augmented dynamics to implement regularization.
         """
-        NFE_COUNT[0] += 1
 
         flat_params = args
         # convert flat_params from Tuple to DeviceArray, then ravel
@@ -163,18 +160,17 @@ if __name__ == "__main__":
         flat_batch_y0_r0, _ = ravel_pytree(batch_y0_r0)
 
         # integrate ODE and count NFE
-        NFE_COUNT[0] = 0
-        pred_y_r = odeint(reg_dynamics, fargs, flat_batch_y0_r0, batch_t, atol=1e-8, rtol=1e-8)
-        print("forward NFE: %d" % NFE_COUNT[0])
+        pred_y_r, nfe = odeint(reg_dynamics, fargs, flat_batch_y0_r0, batch_t, atol=1e-8, rtol=1e-8)
+        print("forward NFE: %d" % nfe)
 
         _, ravel_pred_y_r = ravel_pytree(pred_y_r)
 
         loss_grad = grad_loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
 
         # integrate adjoint ODE and count NFE
-        NFE_COUNT[0] = 0
-        total_grad = ode_vjp(ravel_pred_y_r(loss_grad), pred_y_r, batch_t)
-        print("backward NFE: %d" % NFE_COUNT[0])
+        result = ode_vjp(ravel_pred_y_r(loss_grad), pred_y_r, batch_t)
+        total_grad, nfe = result[:-1], result[-1]
+        print("backward NFE: %d" % nfe)
 
         params_grad = total_grad[3]
         fargs -= parse_args.lr * params_grad
