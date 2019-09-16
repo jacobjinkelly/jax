@@ -21,7 +21,7 @@ parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=20)
+parser.add_argument('--niters', type=int, default=2000)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--lam', type=float, default=1)
 parser.add_argument('--reg', type=str, choices=['none', 'weight', 'state', 'dynamics'], default='none')
@@ -65,8 +65,11 @@ def get_batch():
     return batch_y0, batch_t, batch_y
 
 
-if __name__ == "__main__":
-
+def run(reg, lam):
+    """
+    Run the neural ODEs method.
+    """
+    print("Reg: %s Lambda %.4e" % (reg, lam))
     ii = 0
 
     # set up MLP
@@ -125,9 +128,9 @@ if __name__ == "__main__":
 
         predictions = predict(params, y ** 3)
 
-        if parse_args.reg == "state":
+        if reg == "state":
             regularization = np.sum(y ** 2, axis=1) ** 0.5
-        elif parse_args.reg == "dynamics":
+        elif reg == "dynamics":
             regularization = np.sum(predictions ** 2, axis=1) ** 0.5
         else:
             regularization = np.zeros(parse_args.batch_size)
@@ -142,7 +145,7 @@ if __name__ == "__main__":
         Loss function.
         """
         pred, reg = pred_y_r[:, :, :2], pred_y_r[:, :, 2]
-        return np.mean(np.abs(pred - target)) + parse_args.lam * np.mean(reg)
+        return np.mean(np.abs(pred - target)) + lam * np.mean(reg)
 
     def error_fun(pred, target):
         """
@@ -181,3 +184,29 @@ if __name__ == "__main__":
             loss = loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
             print('Iter {:04d} | Total Loss {:.6f} | Error {:.6f}'.format(itr, loss, error))
             ii += 1
+
+
+if __name__ == "__main__":
+    import os
+    import datetime
+    import sys
+
+    dirname = datetime.datetime.now().strftime("%F-%H-%M-%S")
+    os.mkdir(dirname)
+    filename = "%s/results.txt" % dirname
+    results_file = open(filename, "w")
+    sys.stdout = results_file
+
+    def eprint(*args, **kwargs):
+        """
+        Print to stderr.
+        """
+        print(*args, file=sys.stderr, **kwargs)
+
+    regs = ["none", "state", "dynamics"]
+    lams = [1, 10, 100, 1000]
+    for reg in regs:
+        for lam in lams:
+            eprint("Reg: %s Lambda %.4e" % (reg, lam))
+            run(reg, lam)
+    results_file.close()
