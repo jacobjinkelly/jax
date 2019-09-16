@@ -207,12 +207,12 @@ if __name__ == "__main__":
             print(*args, file=sys.stderr, **kwargs)
 
         hyperparams = {"none": [0],
-                       "state": [1],
-                       "dynamics": [1]
+                       "state": np.linspace(0, 2 * 1.185, 10),
+                       "dynamics": np.linspace(0, 2 * 5.350, 10)
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
-                eprint("Reg: %s Lambda %.4e" % (reg, lam))
+                eprint("Reg: %s\tLambda %.4e" % (reg, lam))
                 run(str(reg), lam)
         results_file.close()
     else:
