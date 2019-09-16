@@ -21,11 +21,11 @@ parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=2000)
+parser.add_argument('--niters', type=int, default=5)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--lam', type=float, default=1)
 parser.add_argument('--reg', type=str, choices=['none', 'weight', 'state', 'dynamics'], default='none')
-parser.add_argument('--test_freq', type=int, default=20)
+parser.add_argument('--test_freq', type=int, default=1)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -140,21 +140,21 @@ def run(reg, lam):
         flat_pred_reg, _ = ravel_pytree(pred_reg)
         return flat_pred_reg
 
-    def loss_fun(pred_y_r, target):
+    def total_loss_fun(pred_y_r, target):
         """
         Loss function.
         """
         pred, reg = pred_y_r[:, :, :2], pred_y_r[:, :, 2]
         return np.mean(np.abs(pred - target)) + lam * np.mean(reg)
 
-    def error_fun(pred, target):
+    def loss_fun(pred, target):
         """
         Mean absolute error.
         """
         return np.mean(np.abs(pred - target))
 
     ode_vjp = grad_odeint(reg_dynamics, fargs)
-    grad_loss_fun = grad(loss_fun)
+    grad_loss_fun = grad(total_loss_fun)
 
     for itr in range(1, parse_args.niters + 1):
         batch_y0, batch_t, batch_y = get_batch()
@@ -180,33 +180,40 @@ def run(reg, lam):
 
         if itr % parse_args.test_freq == 0:
             pred_y = ravel_batch_y_r(pred_y_r)[:, :, :2]
-            error = error_fun(ravel_batch_y(pred_y), batch_y)
-            loss = loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
-            print('Iter {:04d} | Total Loss {:.6f} | Error {:.6f}'.format(itr, loss, error))
+            loss = loss_fun(ravel_batch_y(pred_y), batch_y)
+            total_loss = total_loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
+            print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | Regularization {:.6f}'.
+                  format(itr, total_loss, loss, total_loss - loss))
             ii += 1
 
 
 if __name__ == "__main__":
-    import os
-    import datetime
-    import sys
+    within_python = True
+    if within_python:
+        import os
+        import datetime
+        import sys
 
-    dirname = datetime.datetime.now().strftime("%F-%H-%M-%S")
-    os.mkdir(dirname)
-    filename = "%s/results.txt" % dirname
-    results_file = open(filename, "w")
-    sys.stdout = results_file
+        dirname = datetime.datetime.now().strftime("%F-%H-%M-%S")
+        os.mkdir(dirname)
+        filename = "%s/results.txt" % dirname
+        results_file = open(filename, "w")
+        sys.stdout = results_file
 
-    def eprint(*args, **kwargs):
-        """
-        Print to stderr.
-        """
-        print(*args, file=sys.stderr, **kwargs)
+        def eprint(*args, **kwargs):
+            """
+            Print to stderr.
+            """
+            print(*args, file=sys.stderr, **kwargs)
 
-    regs = ["none", "state", "dynamics"]
-    lams = [1, 10, 100, 1000]
-    for reg in regs:
-        for lam in lams:
-            eprint("Reg: %s Lambda %.4e" % (reg, lam))
-            run(reg, lam)
-    results_file.close()
+        hyperparams = {"none": [0],
+                       "state": [1],
+                       "dynamics": [1]
+                       }
+        for reg in hyperparams.keys():
+            for lam in hyperparams[reg]:
+                eprint("Reg: %s Lambda %.4e" % (reg, lam))
+                run(str(reg), lam)
+        results_file.close()
+    else:
+        run(parse_args.reg, parse_args.lam)
