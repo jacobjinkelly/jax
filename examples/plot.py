@@ -23,7 +23,7 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
     if reg not in plot_points:
         plot_points[reg] = {}
         plot_points[reg]["lam"] = []
-        plot_points[reg]["error"] = []
+        plot_points[reg]["loss"] = []
         plot_points[reg]["all_forward"] = {}
         plot_points[reg]["all_backward"] = {}
         plot_points[reg]["forward"] = []
@@ -32,8 +32,9 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
     plot_points[reg]["lam"].append(lam)
     data = lines[ind + 1:next_ind]
 
+    # TODO: change Error to Loss when parsing new results
     final_error = float(data[-1].split(" | ")[-1].split("Error ")[-1][:-1])
-    plot_points[reg]["error"].append(final_error)
+    plot_points[reg]["loss"].append(final_error)
 
     for i, line in enumerate(data):
         if line.startswith("Iter"):
@@ -52,26 +53,26 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
 
 fig, ax = plt.subplots()
 for reg in plot_points.keys():
-    x, y = plot_points[reg]["forward"], plot_points[reg]["error"]
+    x, y = plot_points[reg]["forward"], plot_points[reg]["loss"]
     ax.plot(x, y, "-o", label=str(reg))
-    # for i, txt in enumerate(plot_points[reg]["lam"]):
+    # for i, txt in enumerate(losses[reg]["lam"]):
     #     ax.annotate(txt, (x[i], y[i]))
 
 plt.legend()
 plt.xlabel("Forward NFE")
-plt.ylabel("Error")
+plt.ylabel("Loss")
 plt.savefig("%s/forward.png" % dir)
 
 fig, ax = plt.subplots()
 for reg in plot_points.keys():
-    x, y = plot_points[reg]["backward"], plot_points[reg]["error"]
+    x, y = plot_points[reg]["backward"], plot_points[reg]["loss"]
     ax.plot(x, y, "-o", label=str(reg))
-    # for i, txt in enumerate(plot_points[reg]["lam"]):
+    # for i, txt in enumerate(losses[reg]["lam"]):
     #     ax.annotate(txt, (x[i], y[i]))
 
 plt.legend()
 plt.xlabel("Backward NFE")
-plt.ylabel("Error")
+plt.ylabel("Loss")
 plt.savefig("%s/backward.png" % dir)
 
 for reg in plot_points.keys():
