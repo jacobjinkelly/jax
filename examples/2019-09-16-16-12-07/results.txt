@@ -1,0 +1,48 @@
+Reg: none Lambda 1.0000e+00
+forward NFE: 20
+backward NFE: 126
+Iter 0001 | Total (Regularized) Loss 0.078670 | Loss 0.078670 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0002 | Total (Regularized) Loss 0.101156 | Loss 0.101156 | Regularization 0.000000
+forward NFE: 26
+backward NFE: 126
+Iter 0003 | Total (Regularized) Loss 0.043359 | Loss 0.043359 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0004 | Total (Regularized) Loss 0.061202 | Loss 0.061202 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0005 | Total (Regularized) Loss 0.081207 | Loss 0.081207 | Regularization 0.000000
+Reg: state Lambda 1.0000e+00
+forward NFE: 32
+backward NFE: 126
+Iter 0001 | Total (Regularized) Loss 0.146347 | Loss 0.059468 | Regularization 0.086879
+forward NFE: 26
+backward NFE: 126
+Iter 0002 | Total (Regularized) Loss 0.263761 | Loss 0.155748 | Regularization 0.108013
+forward NFE: 26
+backward NFE: 126
+Iter 0003 | Total (Regularized) Loss 0.199111 | Loss 0.103551 | Regularization 0.095561
+forward NFE: 20
+backward NFE: 126
+Iter 0004 | Total (Regularized) Loss 0.167175 | Loss 0.079907 | Regularization 0.087268
+forward NFE: 26
+backward NFE: 126
+Iter 0005 | Total (Regularized) Loss 0.290992 | Loss 0.187112 | Regularization 0.103880
+Reg: dynamics Lambda 1.0000e+00
+forward NFE: 20
+backward NFE: 126
+Iter 0001 | Total (Regularized) Loss 0.113085 | Loss 0.092864 | Regularization 0.020221
+forward NFE: 20
+backward NFE: 126
+Iter 0002 | Total (Regularized) Loss 0.063235 | Loss 0.053774 | Regularization 0.009461
+forward NFE: 20
+backward NFE: 126
+Iter 0003 | Total (Regularized) Loss 0.048871 | Loss 0.040662 | Regularization 0.008210
+forward NFE: 20
+backward NFE: 126
+Iter 0004 | Total (Regularized) Loss 0.110017 | Loss 0.090928 | Regularization 0.019089
+forward NFE: 20
+backward NFE: 126
+Iter 0005 | Total (Regularized) Loss 0.167709 | Loss 0.146102 | Regularization 0.021608
