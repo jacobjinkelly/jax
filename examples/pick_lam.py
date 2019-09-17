@@ -2,9 +2,8 @@
 For parsing and plotting the results of neural_odes.py
 """
 import numpy as np
-import matplotlib.pyplot as plt
 
-dir = "2019-09-16-16-12-07"
+dir = "2019-09-17-16-04-06"
 results_path = "%s/results.txt" % dir
 
 file = open(results_path, "r")
