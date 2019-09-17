@@ -330,7 +330,6 @@ def grad_odeint(ofunc, args):
     @jax.jit
     def vjp_all(g, yt, t):
         """Calculate the VJP g * Jac(odeint(ofunc(yt, t, *args), t)."""
-        # TODO: this thing needs to return NFE
         rev_yt = yt[-1:0:-1, :]
         rev_t = t[-1:0:-1]
         rev_tarray = -np.array([t[-1:0:-1], t[-2::-1]]).T
