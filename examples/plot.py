@@ -24,6 +24,7 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
         plot_points[reg] = {}
         plot_points[reg]["lam"] = []
         plot_points[reg]["loss"] = []
+        plot_points[reg]["all_loss"] = {}
         plot_points[reg]["all_forward"] = {}
         plot_points[reg]["all_backward"] = {}
         plot_points[reg]["forward"] = []
@@ -36,12 +37,17 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
     final_error = float(data[-1].split(" | ")[-1].split("Error ")[-1][:-1])
     plot_points[reg]["loss"].append(final_error)
 
-    for i, line in enumerate(data):
+    nfe = []
+    losses = []
+    for line in data:
         if line.startswith("Iter"):
-            data.pop(i)
+            losses.append(float(line.split(" | ")[-1].split("Error ")[-1][:-1]))
+        else:
+            nfe.append(line)
+    plot_points[reg]["all_loss"][lam] = losses
 
-    forward = data[0::2]
-    backward = data[1::2]
+    forward = nfe[0::2]
+    backward = nfe[1::2]
     for i, point in enumerate(forward):
         forward[i] = int(point.split("forward NFE: ")[-1][:-1])
     for i, point in enumerate(backward):
@@ -109,3 +115,18 @@ for reg in plot_points.keys():
     plt.xlabel("Training")
     plt.ylabel("Backward NFE")
     plt.savefig("%s/%s_all_backward.png" % (dir, reg))
+
+for reg in plot_points.keys():
+    fig, ax = plt.subplots()
+    for lam in plot_points[reg]["all_loss"].keys():
+        if lam > 1:
+            continue
+        x, y = zip(*enumerate(plot_points[reg]["all_loss"][lam]))
+        x = 20 * np.array(x)
+        ax.plot(x, y, label=lam)
+
+    plt.legend()
+    plt.title("Reg: %s" % reg)
+    plt.xlabel("Training")
+    plt.ylabel("Loss")
+    plt.savefig("%s/%s_loss.png" % (dir, reg))
