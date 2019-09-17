@@ -4,7 +4,7 @@ For parsing and plotting the results of neural_odes.py
 import numpy as np
 import matplotlib.pyplot as plt
 
-dir = "2019-09-15-22-54-04"
+dir = "2019-09-17-16-13-10"
 results_path = "%s/results.txt" % dir
 
 file = open(results_path, "r")
@@ -34,14 +34,14 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
     data = lines[ind + 1:next_ind]
 
     # TODO: change Error to Loss when parsing new results
-    final_error = float(data[-1].split(" | ")[-1].split("Error ")[-1][:-1])
-    plot_points[reg]["loss"].append(final_error)
+    final_loss = float(data[-1].split(" | ")[-2].split("Loss ")[-1][:-1])
+    plot_points[reg]["loss"].append(final_loss)
 
     nfe = []
     losses = []
     for line in data:
         if line.startswith("Iter"):
-            losses.append(float(line.split(" | ")[-1].split("Error ")[-1][:-1]))
+            losses.append(float(line.split(" | ")[-2].split("Loss ")[-1][:-1]))
         else:
             nfe.append(line)
     plot_points[reg]["all_loss"][lam] = losses
