@@ -107,10 +107,7 @@ def run(reg, lam):
         """
 
         flat_params = args
-        # convert flat_params from Tuple to DeviceArray, then ravel
-        # TODO: convert to device array more quickly?
-        flat_params, _ = ravel_pytree(flat_params)
-        params = ravel_params(flat_params)
+        params = ravel_params(np.array(flat_params))
 
         # separate out state from augmented
         y_r = ravel_batch_y0_r0(y_r)
@@ -136,10 +133,7 @@ def run(reg, lam):
         """
 
         flat_params = args
-        # convert flat_params from Tuple to DeviceArray, then ravel
-        # TODO: convert to device array more quickly?
-        flat_params, _ = ravel_pytree(flat_params)
-        params = ravel_params(flat_params)
+        params = ravel_params(np.array(flat_params))
 
         # separate out state from augmented
         y_r = ravel_true_y0_r0(y_r)
