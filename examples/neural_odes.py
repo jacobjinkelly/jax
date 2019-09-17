@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import argparse
 
+import jax
 from jax.experimental import stax
 from jax.experimental.stax import Dense, Tanh
 from jax.experimental.ode import odeint, grad_odeint
@@ -21,7 +22,7 @@ parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=10)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=5)
+parser.add_argument('--niters', type=int, default=20)
 parser.add_argument('--lr', type=float, default=0.001)
 parser.add_argument('--lam', type=float, default=1)
 parser.add_argument('--reg', type=str, choices=['none', 'weight', 'state', 'dynamics'], default='none')
@@ -49,6 +50,9 @@ def true_func(y, t):
 
 
 true_y, _ = odeint(true_func, (), true_y0, t, atol=1e-8, rtol=1e-8)
+
+# expand to batched version for use in testing
+true_y0 = np.expand_dims(true_y0, axis=0)
 
 
 def get_batch():
@@ -97,21 +101,6 @@ def run(reg, lam):
     _, ravel_batch_y = ravel_pytree(batch_y)
     fargs = flat_params
 
-    def f(y, t, *args):
-        """
-        Simple MLP.
-        """
-        flat_params = args
-        # convert flat_params from Tuple to DeviceArray, then ravel
-        flat_params, _ = ravel_pytree(flat_params)
-        params = ravel_params(flat_params)
-
-        y = ravel_batch_y0(y)
-        predictions = predict(params, y ** 3)
-
-        flat_predictions, _ = ravel_pytree(predictions)
-        return flat_predictions
-
     def reg_dynamics(y_r, t, *args):
         """
         Augmented dynamics to implement regularization.
@@ -119,6 +108,7 @@ def run(reg, lam):
 
         flat_params = args
         # convert flat_params from Tuple to DeviceArray, then ravel
+        # TODO: convert to device array more quickly?
         flat_params, _ = ravel_pytree(flat_params)
         params = ravel_params(flat_params)
 
@@ -134,6 +124,35 @@ def run(reg, lam):
             regularization = np.sum(predictions ** 2, axis=1) ** 0.5
         else:
             regularization = np.zeros(parse_args.batch_size)
+
+        regularization = np.expand_dims(regularization, axis=1)
+        pred_reg = np.concatenate((predictions, regularization), axis=1)
+        flat_pred_reg, _ = ravel_pytree(pred_reg)
+        return flat_pred_reg
+
+    def test_reg_dynamics(y_r, t, *args):
+        """
+        Augmented dynamics to implement regularization. (on test)
+        """
+
+        flat_params = args
+        # convert flat_params from Tuple to DeviceArray, then ravel
+        # TODO: convert to device array more quickly?
+        flat_params, _ = ravel_pytree(flat_params)
+        params = ravel_params(flat_params)
+
+        # separate out state from augmented
+        y_r = ravel_true_y0_r0(y_r)
+        y, r = y_r[:, :2], y_r[:, 2]
+
+        predictions = predict(params, y ** 3)
+
+        if reg == "state":
+            regularization = np.sum(y ** 2, axis=1) ** 0.5
+        elif reg == "dynamics":
+            regularization = np.sum(predictions ** 2, axis=1) ** 0.5
+        else:
+            regularization = np.zeros(1)
 
         regularization = np.expand_dims(regularization, axis=1)
         pred_reg = np.concatenate((predictions, regularization), axis=1)
@@ -179,9 +198,13 @@ def run(reg, lam):
         fargs -= parse_args.lr * params_grad
 
         if itr % parse_args.test_freq == 0:
-            pred_y = ravel_batch_y_r(pred_y_r)[:, :, :2]
-            loss = loss_fun(ravel_batch_y(pred_y), batch_y)
-            total_loss = total_loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
+            r0 = np.zeros((1, 1))
+            true_y0_r0 = np.concatenate((true_y0, r0), axis=1)
+            flat_true_y0_r0, ravel_true_y0_r0 = ravel_pytree(true_y0_r0)
+            pred_y_r, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_r0, t, atol=1e-8, rtol=1e-8)
+            pred_y = pred_y_r[:, :2]
+            loss = loss_fun(pred_y, true_y)
+            total_loss = total_loss_fun(np.expand_dims(pred_y_r, axis=1), np.expand_dims(true_y, axis=1))
             print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | Regularization {:.6f}'.
                   format(itr, total_loss, loss, total_loss - loss))
             ii += 1
@@ -207,8 +230,8 @@ if __name__ == "__main__":
             print(*args, file=sys.stderr, **kwargs)
 
         hyperparams = {"none": [0],
-                       "state": np.linspace(0, 2 * 1.185, 10),
-                       "dynamics": np.linspace(0, 2 * 5.350, 10)
+                       # "state": np.linspace(0, 2 * 1.185, 10),
+                       # "dynamics": np.linspace(0, 2 * 5.350, 10)
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
