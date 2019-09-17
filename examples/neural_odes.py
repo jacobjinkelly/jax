@@ -9,7 +9,7 @@ from __future__ import print_function
 import argparse
 
 import jax
-from jax.experimental import stax
+from jax.experimental import stax, optimizers
 from jax.experimental.stax import Dense, Tanh
 from jax.experimental.ode import odeint, grad_odeint
 from jax import random, grad
@@ -169,11 +169,17 @@ def run(reg, lam):
     ode_vjp = grad_odeint(reg_dynamics, fargs)
     grad_loss_fun = grad(total_loss_fun)
 
+    opt_init, opt_update, get_params = optimizers.rmsprop(step_size=1e-3, gamma=0.99)
+
+    opt_state = opt_init(fargs)
     for itr in range(1, parse_args.niters + 1):
+        # get the next batch and pack it
         batch_y0, batch_t, batch_y = get_batch()
         r0 = np.zeros((parse_args.batch_size, 1))
         batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
         flat_batch_y0_r0, _ = ravel_pytree(batch_y0_r0)
+
+        fargs = get_params(opt_state)
 
         # integrate ODE and count NFE
         pred_y_r, nfe = odeint(reg_dynamics, fargs, flat_batch_y0_r0, batch_t, atol=1e-8, rtol=1e-8)
@@ -189,9 +195,11 @@ def run(reg, lam):
         print("backward NFE: %d" % nfe)
 
         params_grad = total_grad[3]
-        fargs -= parse_args.lr * params_grad
+
+        opt_state = opt_update(itr, params_grad, opt_state)
 
         if itr % parse_args.test_freq == 0:
+            fargs = get_params(opt_state)
             r0 = np.zeros((1, 1))
             true_y0_r0 = np.concatenate((true_y0, r0), axis=1)
             flat_true_y0_r0, ravel_true_y0_r0 = ravel_pytree(true_y0_r0)
