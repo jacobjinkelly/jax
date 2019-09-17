@@ -231,9 +231,10 @@ if __name__ == "__main__":
             """
             print(*args, file=sys.stderr, **kwargs)
 
-        hyperparams = {"none": [0],
-                       # "state": np.linspace(0, 2 * 1.185, 10),
-                       # "dynamics": np.linspace(0, 2 * 5.350, 10)
+        hyperparams = {
+                       "none": [0],
+                       "state": np.linspace(0, 2 * 0.057, 10),
+                       "dynamics": np.linspace(0, 2 * 0.265, 10)
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
