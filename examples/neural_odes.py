@@ -217,9 +217,9 @@ def run(reg, lam):
             ii += 1
 
         if itr % parse_args.save_freq == 0:
-            param_filename = "%d_fargs.pickle" % itr
+            param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
             outfile = open(param_filename, "wb")
-            pickle.dump(fargs, param_filename)
+            pickle.dump(fargs, outfile)
             outfile.close()
 
 
