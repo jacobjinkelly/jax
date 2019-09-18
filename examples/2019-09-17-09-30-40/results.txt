@@ -1,0 +1,103 @@
+Reg: none Lambda 0.0000e+00
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0001 | Total (Regularized) Loss 0.053796 | Loss 0.053796 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0002 | Total (Regularized) Loss 0.053792 | Loss 0.053792 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0003 | Total (Regularized) Loss 0.053788 | Loss 0.053788 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0004 | Total (Regularized) Loss 0.053783 | Loss 0.053783 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0005 | Total (Regularized) Loss 0.053779 | Loss 0.053779 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0006 | Total (Regularized) Loss 0.053775 | Loss 0.053775 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0007 | Total (Regularized) Loss 0.053770 | Loss 0.053770 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0008 | Total (Regularized) Loss 0.053766 | Loss 0.053766 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0009 | Total (Regularized) Loss 0.053762 | Loss 0.053762 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0010 | Total (Regularized) Loss 0.053757 | Loss 0.053757 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0011 | Total (Regularized) Loss 0.053753 | Loss 0.053753 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0012 | Total (Regularized) Loss 0.053749 | Loss 0.053749 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0013 | Total (Regularized) Loss 0.053744 | Loss 0.053744 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0014 | Total (Regularized) Loss 0.053740 | Loss 0.053740 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0015 | Total (Regularized) Loss 0.053736 | Loss 0.053736 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0016 | Total (Regularized) Loss 0.053731 | Loss 0.053731 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0017 | Total (Regularized) Loss 0.053727 | Loss 0.053727 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0018 | Total (Regularized) Loss 0.053723 | Loss 0.053723 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0019 | Total (Regularized) Loss 0.053718 | Loss 0.053718 | Regularization 0.000000
+[365 302 574 473 403 125 733 612 182 953 424 476 474  94 566 862 386 374
+ 875 234]
+forward NFE: 20
+backward NFE: 126
+Iter 0020 | Total (Regularized) Loss 0.053714 | Loss 0.053714 | Regularization 0.000000

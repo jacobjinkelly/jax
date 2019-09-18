@@ -1,0 +1,1 @@
+Make sure code works for different lambda scales for each reg method.

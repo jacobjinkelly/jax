@@ -1,0 +1,1 @@
+Print out the gradient to make sure weights are getting updated. They are.

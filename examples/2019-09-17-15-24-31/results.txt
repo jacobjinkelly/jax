@@ -1,0 +1,61 @@
+Reg: none Lambda 0.0000e+00
+forward NFE: 20
+backward NFE: 126
+Iter 0001 | Total (Regularized) Loss 11.898301 | Loss 11.898301 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0002 | Total (Regularized) Loss 11.896267 | Loss 11.896267 | Regularization 0.000000
+forward NFE: 26
+backward NFE: 126
+Iter 0003 | Total (Regularized) Loss 11.895006 | Loss 11.895006 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0004 | Total (Regularized) Loss 11.893679 | Loss 11.893679 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0005 | Total (Regularized) Loss 11.890807 | Loss 11.890807 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0006 | Total (Regularized) Loss 11.889783 | Loss 11.889783 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0007 | Total (Regularized) Loss 11.889347 | Loss 11.889347 | Regularization 0.000000
+forward NFE: 38
+backward NFE: 126
+Iter 0008 | Total (Regularized) Loss 11.887335 | Loss 11.887335 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0009 | Total (Regularized) Loss 11.887083 | Loss 11.887083 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0010 | Total (Regularized) Loss 11.885613 | Loss 11.885613 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0011 | Total (Regularized) Loss 11.884288 | Loss 11.884288 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0012 | Total (Regularized) Loss 11.882588 | Loss 11.882588 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0013 | Total (Regularized) Loss 11.881422 | Loss 11.881422 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0014 | Total (Regularized) Loss 11.880131 | Loss 11.880131 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0015 | Total (Regularized) Loss 11.878753 | Loss 11.878753 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0016 | Total (Regularized) Loss 11.876774 | Loss 11.876774 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0017 | Total (Regularized) Loss 11.872894 | Loss 11.872894 | Regularization 0.000000
+forward NFE: 26
+backward NFE: 126
+Iter 0018 | Total (Regularized) Loss 11.871686 | Loss 11.871686 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0019 | Total (Regularized) Loss 11.869713 | Loss 11.869713 | Regularization 0.000000
+forward NFE: 20
+backward NFE: 126
+Iter 0020 | Total (Regularized) Loss 11.867746 | Loss 11.867746 | Regularization 0.000000

@@ -1,0 +1,1 @@
+Picking scale of lambda. (doing again with correct loss)

@@ -1,0 +1,1 @@
+Your first large experiment where you actually plotted results. Main issues were scale of lambda, and also it isn't training.
