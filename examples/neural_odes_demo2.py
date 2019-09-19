@@ -75,11 +75,11 @@ def run(reg, lam):
         Dense(2)
     )
 
-    output_shape, init_params = init_random_params(key, (-1, 2))
+    output_shape, init_params = init_random_params(key, (-1, 3))
     assert output_shape == (-1, 2)
 
     flat_params, ravel_params = ravel_pytree(init_params)
-    batch_y0, _, batch_y = get_batch()
+    batch_y0, batch_t, batch_y = get_batch()
 
     r0 = np.zeros((parse_args.batch_size, 1))
     batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
@@ -87,28 +87,51 @@ def run(reg, lam):
 
     _, ravel_batch_y0 = ravel_pytree(batch_y0)
 
+    batch_y0_t = np.concatenate((batch_y0,
+                                 np.expand_dims(
+                                     np.repeat(batch_t[0], parse_args.batch_size),
+                                     axis=1)
+                                 ),
+                                axis=1)
+    _, ravel_batch_y0_t = ravel_pytree(batch_y0_t)
+
+    batch_y0_t_r0 = np.concatenate((batch_y0_t, r0), axis=1)
+    _, ravel_batch_y0_t_r0 = ravel_pytree(batch_y0_t_r0)
+
     r = np.zeros((parse_args.batch_time, parse_args.batch_size, 1))
     batch_y_r = np.concatenate((batch_y, r), axis=2)
     _, ravel_batch_y_r = ravel_pytree(batch_y_r)
 
+    batch_y_t_r = np.concatenate((batch_y,
+                                  np.expand_dims(
+                                      np.tile(batch_t, (parse_args.batch_size, 1)).T,
+                                      axis=2),
+                                  r),
+                                 axis=2)
+    _, ravel_batch_y_t_r = ravel_pytree(batch_y_t_r)
+
     _, ravel_batch_y = ravel_pytree(batch_y)
     fargs = flat_params
 
-    def dynamics(y, t, *args):
+    def dynamics(y_t, t, *args):
         """
-        Augmented dynamics to implement regularization.
+        Time-augmented dynamics.
         """
 
         flat_params = args
         params = ravel_params(np.array(flat_params))
 
-        y = ravel_batch_y0(y)
-        predictions = predict(params, y)
+        y_t = ravel_batch_y0_t(y_t)
+
+        predictions_y = predict(params, y_t)
+        predictions = np.concatenate((predictions_y,
+                                      np.ones((parse_args.batch_size, 1))),
+                                     axis=1)
 
         flat_predictions, _ = ravel_pytree(predictions)
         return flat_predictions
 
-    def reg_dynamics(y_r, t, *args):
+    def reg_dynamics(y_t_r, t, *args):
         """
         Augmented dynamics to implement regularization.
         """
@@ -117,15 +140,19 @@ def run(reg, lam):
         params = ravel_params(np.array(flat_params))
 
         # separate out state from augmented
-        y_r = ravel_batch_y0_r0(y_r)
-        y, r = y_r[:, :2], y_r[:, 2]
+        y_r = ravel_batch_y0_t_r0(y_t_r)
+        y_t, r = y_r[:, :-1], y_r[:, -1]
+        y = y_t[:, :-1]
 
-        predictions = predict(params, y)
+        predictions_y = predict(params, y_t)
+        predictions = np.concatenate((predictions_y,
+                                      np.ones((parse_args.batch_size, 1))),
+                                     axis=1)
 
         if reg == "state":
             regularization = np.sum(y ** 2, axis=1) ** 0.5
         elif reg == "dynamics":
-            regularization = np.sum(predictions ** 2, axis=1) ** 0.5
+            regularization = np.sum(predictions_y ** 2, axis=1) ** 0.5
         else:
             regularization = np.zeros(parse_args.batch_size)
 
@@ -143,17 +170,21 @@ def run(reg, lam):
         params = ravel_params(np.array(flat_params))
 
         # separate out state from augmented
-        y_r = ravel_true_y0_r0(y_r)
-        y, r = y_r[:, :2], y_r[:, 2]
+        y_r = ravel_true_y0_t_r0(y_r)
+        y_t, r = y_r[:, :-1], y_r[:, -1]
+        y = y_t[:, :-1]
 
-        predictions = predict(params, y)
+        predictions_y = predict(params, y_t)
+        predictions = np.concatenate((predictions_y,
+                                      np.ones((parse_args.data_size, 1))),
+                                     axis=1)
 
         if reg == "state":
             regularization = np.sum(y ** 2, axis=1) ** 0.5
         elif reg == "dynamics":
-            regularization = np.sum(predictions ** 2, axis=1) ** 0.5
+            regularization = np.sum(predictions_y ** 2, axis=1) ** 0.5
         else:
-            regularization = np.zeros(1000)
+            regularization = np.zeros(parse_args.data_size)
 
         regularization = np.expand_dims(regularization, axis=1)
         pred_reg = np.concatenate((predictions, regularization), axis=1)
@@ -185,27 +216,34 @@ def run(reg, lam):
     for itr in range(1, parse_args.niters + 1):
         # get the next batch and pack it
         batch_y0, batch_t, batch_y = get_batch()
-        flat_batch_y0, _ = ravel_pytree(batch_y0)
+        batch_y0_t = np.concatenate((batch_y0,
+                                    np.expand_dims(
+                                        np.repeat(batch_t[0], parse_args.batch_size),
+                                        axis=1)
+                                     ),
+                                    axis=1)
+        flat_batch_y0_t, _ = ravel_pytree(batch_y0_t)
         r0 = np.zeros((parse_args.batch_size, 1))
-        batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
-        flat_batch_y0_r0, _ = ravel_pytree(batch_y0_r0)
+        batch_y0_t_r0 = np.concatenate((batch_y0_t, r0), axis=1)
+        flat_batch_y0_t_r0, _ = ravel_pytree(batch_y0_t_r0)
 
         fargs = get_params(opt_state)
 
         # integrate ODE (including reg) and count NFE (on unreg)
-        tmp_pred_y, nfe = odeint(dynamics, fargs, flat_batch_y0, batch_t, atol=1e-8, rtol=1e-8)
-        pred_y_r, _ = odeint(reg_dynamics, fargs, flat_batch_y0_r0, batch_t, atol=1e-8, rtol=1e-8)
+        tmp_pred_y_t, nfe = odeint(dynamics, fargs, flat_batch_y0_t, batch_t, atol=1e-8, rtol=1e-8)
+        pred_y_t_r, _ = odeint(reg_dynamics, fargs, flat_batch_y0_t_r0, batch_t, atol=1e-8, rtol=1e-8)
         print("forward NFE: %d" % nfe)
 
-        _, ravel_pred_y = ravel_pytree(tmp_pred_y)
-        pred_y = ravel_pred_y(ravel_batch_y_r(pred_y_r)[:, :, :2])
-        _, ravel_pred_y_r = ravel_pytree(pred_y_r)
+        _, ravel_pred_y_t = ravel_pytree(tmp_pred_y_t)
+        pred_y_t = ravel_pred_y_t(ravel_batch_y_t_r(pred_y_t_r)[:, :, :-1])
+        _, ravel_pred_y_t_r = ravel_pytree(pred_y_t_r)
 
-        loss_grad = grad_loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
+        # TODO: time in loss?
+        loss_grad = grad_loss_fun(ravel_batch_y_t_r(pred_y_t_r), batch_y)
 
         # integrate adjoint ODE and count NFE
-        nfe = ode_vjp(ravel_pred_y(loss_grad[:, :, :2]), pred_y, batch_t)[-1]
-        params_grad = reg_ode_vjp(ravel_pred_y_r(loss_grad), pred_y_r, batch_t)[:-1][3]
+        nfe = ode_vjp(ravel_pred_y_t(loss_grad[:, :, :-1]), pred_y_t, batch_t)[-1]
+        params_grad = reg_ode_vjp(ravel_pred_y_t_r(loss_grad), pred_y_t_r, batch_t)[:-1][3]
         print("backward NFE: %d" % nfe)
 
         opt_state = opt_update(itr, params_grad, opt_state)
@@ -213,17 +251,20 @@ def run(reg, lam):
         if itr % parse_args.test_freq == 0:
             fargs = get_params(opt_state)
             r0 = np.zeros((parse_args.data_size, 1))
-            true_y0_r0 = np.concatenate((true_y0, r0), axis=1)
-            flat_true_y0_r0, ravel_true_y0_r0 = ravel_pytree(true_y0_r0)
-            pred_y_r, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_r0, t, atol=1e-8, rtol=1e-8)
+            true_y0_t_r0 = np.concatenate((true_y0,
+                                           np.expand_dims(
+                                               np.repeat(t[0], parse_args.data_size), axis=1),
+                                           r0), axis=1)
+            flat_true_y0_t_r0, ravel_true_y0_t_r0 = ravel_pytree(true_y0_t_r0)
+            pred_y_t_r, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0, t, atol=1e-8, rtol=1e-8)
 
-            pred_y0_r, pred_y1_r = pred_y_r[0, :], pred_y_r[1, :]
-            pred_y0_r, pred_y1_r = ravel_true_y0_r0(pred_y0_r), ravel_true_y0_r0(pred_y1_r)
-            pred_y = np.concatenate((np.expand_dims(pred_y0_r[:, :2], axis=0),
-                                     np.expand_dims(pred_y1_r[:, :2], axis=0)),
+            pred_y0_t_r, pred_y1_t_r = pred_y_t_r[0, :], pred_y_t_r[1, :]
+            pred_y0_t_r, pred_y1_t_r = ravel_true_y0_t_r0(pred_y0_t_r), ravel_true_y0_t_r0(pred_y1_t_r)
+            pred_y = np.concatenate((np.expand_dims(pred_y0_t_r[:, :-2], axis=0),
+                                     np.expand_dims(pred_y1_t_r[:, :-2], axis=0)),
                                     axis=0)
-            pred_y_r = np.concatenate((np.expand_dims(pred_y0_r, axis=0),
-                                       np.expand_dims(pred_y1_r, axis=0)),
+            pred_y_r = np.concatenate((np.expand_dims(pred_y0_t_r[:, [0, 1, -1]], axis=0),
+                                       np.expand_dims(pred_y1_t_r[:, [0, 1, -1]], axis=0)),
                                       axis=0)
 
             loss = loss_fun(pred_y, true_y)
