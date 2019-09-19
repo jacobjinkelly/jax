@@ -26,7 +26,7 @@ parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lam', type=float, default=1)
 parser.add_argument('--reg', type=str, choices=['none', 'weight', 'state', 'dynamics'], default='none')
-parser.add_argument('--test_freq', type=int, default=20)
+parser.add_argument('--test_freq', type=int, default=1)
 parser.add_argument('--save_freq', type=int, default=100)
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -102,6 +102,20 @@ def run(reg, lam):
     _, ravel_batch_y = ravel_pytree(batch_y)
     fargs = flat_params
 
+    def dynamics(y, t, *args):
+        """
+        Augmented dynamics to implement regularization.
+        """
+
+        flat_params = args
+        params = ravel_params(np.array(flat_params))
+
+        y = ravel_batch_y0(y)
+        predictions = predict(params, y ** 3)
+
+        flat_predictions, _ = ravel_pytree(predictions)
+        return flat_predictions
+
     def reg_dynamics(y_r, t, *args):
         """
         Augmented dynamics to implement regularization.
@@ -169,7 +183,8 @@ def run(reg, lam):
         """
         return np.mean(np.abs(pred - target))
 
-    ode_vjp = grad_odeint(reg_dynamics, fargs)
+    ode_vjp = grad_odeint(dynamics, fargs)
+    reg_ode_vjp = grad_odeint(reg_dynamics, fargs)
     grad_loss_fun = jax.jit(grad(total_loss_fun))
 
     opt_init, opt_update, get_params = optimizers.rmsprop(step_size=1e-3, gamma=0.99)
@@ -178,26 +193,28 @@ def run(reg, lam):
     for itr in range(1, parse_args.niters + 1):
         # get the next batch and pack it
         batch_y0, batch_t, batch_y = get_batch()
+        flat_batch_y0, _ = ravel_pytree(batch_y0)
         r0 = np.zeros((parse_args.batch_size, 1))
         batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
         flat_batch_y0_r0, _ = ravel_pytree(batch_y0_r0)
 
         fargs = get_params(opt_state)
 
-        # integrate ODE and count NFE
-        pred_y_r, nfe = odeint(reg_dynamics, fargs, flat_batch_y0_r0, batch_t, atol=1e-8, rtol=1e-8)
+        # integrate ODE (including reg) and count NFE (on unreg)
+        tmp_pred_y, nfe = odeint(dynamics, fargs, flat_batch_y0, batch_t, atol=1e-8, rtol=1e-8)
+        pred_y_r, _ = odeint(reg_dynamics, fargs, flat_batch_y0_r0, batch_t, atol=1e-8, rtol=1e-8)
         print("forward NFE: %d" % nfe)
 
+        _, ravel_pred_y = ravel_pytree(tmp_pred_y)
+        pred_y = ravel_pred_y(ravel_batch_y_r(pred_y_r)[:, :, :2])
         _, ravel_pred_y_r = ravel_pytree(pred_y_r)
 
         loss_grad = grad_loss_fun(ravel_batch_y_r(pred_y_r), batch_y)
 
         # integrate adjoint ODE and count NFE
-        result = ode_vjp(ravel_pred_y_r(loss_grad), pred_y_r, batch_t)
-        total_grad, nfe = result[:-1], result[-1]
+        nfe = ode_vjp(ravel_pred_y(loss_grad[:, :, :2]), pred_y, batch_t)[-1]
+        params_grad = reg_ode_vjp(ravel_pred_y_r(loss_grad), pred_y_r, batch_t)[:-1][3]
         print("backward NFE: %d" % nfe)
-
-        params_grad = total_grad[3]
 
         opt_state = opt_update(itr, params_grad, opt_state)
 
