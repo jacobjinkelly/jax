@@ -25,7 +25,7 @@ parser.add_argument('--batch_time', type=int, default=2)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--niters', type=int, default=20)
 parser.add_argument('--lam', type=float, default=1)
-parser.add_argument('--reg', type=str, choices=['none', 'weight', 'state', 'dynamics'], default='none')
+parser.add_argument('--reg', type=str, choices=['none', 'r0', 'r1'], default='none')
 parser.add_argument('--test_freq', type=int, default=1)
 parser.add_argument('--save_freq', type=int, default=100)
 parser.add_argument('--viz', action='store_true')
@@ -149,9 +149,9 @@ def run(reg, lam):
                                       np.ones((parse_args.batch_size, 1))),
                                      axis=1)
 
-        if reg == "state":
+        if reg == "r0":
             regularization = np.sum(y ** 2, axis=1) ** 0.5
-        elif reg == "dynamics":
+        elif reg == "r1":
             regularization = np.sum(predictions_y ** 2, axis=1) ** 0.5
         else:
             regularization = np.zeros(parse_args.batch_size)
@@ -179,9 +179,9 @@ def run(reg, lam):
                                       np.ones((parse_args.data_size, 1))),
                                      axis=1)
 
-        if reg == "state":
+        if reg == "r0":
             regularization = np.sum(y ** 2, axis=1) ** 0.5
-        elif reg == "dynamics":
+        elif reg == "r1":
             regularization = np.sum(predictions_y ** 2, axis=1) ** 0.5
         else:
             regularization = np.zeros(parse_args.data_size)
@@ -303,8 +303,8 @@ if __name__ == "__main__":
 
         hyperparams = {
                        "none": [0],
-                       "state": np.linspace(0, 2 * 0.057, 5)[1:],
-                       "dynamics": np.linspace(0, 2 * 0.265, 5)[1:]
+                       "r0": np.linspace(0, 2 * 0.057, 5)[1:],
+                       "r1": np.linspace(0, 2 * 0.265, 5)[1:]
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
