@@ -1,0 +1,1 @@
+Confirm that seeding fixes issue of reg w/ lam=0 is the same as no reg at all.
