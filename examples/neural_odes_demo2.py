@@ -303,11 +303,14 @@ if __name__ == "__main__":
 
         hyperparams = {
                        "none": [0],
+                       "state": [0],
+                       "dynamics": [0]
                        # "state": np.linspace(0, 2 * 0.057, 5),
                        # "dynamics": np.linspace(0, 2 * 0.265, 5)
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
+                key = random.PRNGKey(0)
                 eprint("Reg: %s\tLambda %.4e" % (reg, lam))
                 run(str(reg), lam)
         results_file.close()
