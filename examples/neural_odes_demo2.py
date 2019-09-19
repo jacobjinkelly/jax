@@ -303,10 +303,8 @@ if __name__ == "__main__":
 
         hyperparams = {
                        "none": [0],
-                       "state": [0],
-                       "dynamics": [0]
-                       # "state": np.linspace(0, 2 * 0.057, 5),
-                       # "dynamics": np.linspace(0, 2 * 0.265, 5)
+                       "state": np.linspace(0, 2 * 0.057, 5)[1:],
+                       "dynamics": np.linspace(0, 2 * 0.265, 5)[1:]
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
