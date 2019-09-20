@@ -3,37 +3,26 @@ For parsing and plotting the results of neural_odes.py
 """
 import numpy as np
 
-dir = "2019-09-17-16-04-06"
+dir = "2019-09-19-17-35-06"
 results_path = "%s/results.txt" % dir
 
 file = open(results_path, "r")
 
 lines = file.readlines()
 
-inds = []
-for i, line in enumerate(lines):
-    if line.startswith("Reg:"):
-        inds.append(i)
+data = lines[1:][2::3]
 
-losses = {}
-for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
-    split = lines[ind][len("Reg: "):].split("Lambda ")
-    reg_type, lam = split[0][:-1], float(split[1][:-1])
-    if reg_type == "none":
-        continue
-    if reg_type not in losses:
-        losses[reg_type] = []
+reg_data = {"r0": [],
+            "r1": []
+            }
+for line in data:
+    split = line.split(" | ")
+    loss = float(split[-len(reg_data.keys()) - 1].split("Loss ")[-1][:-1])
+    reg_line = split[-len(reg_data.keys()):]
+    for reg_name, reg_seg in zip(reg_data.keys(), reg_line):
 
-    data = lines[ind + 1:next_ind]
-    loss_lines = []
-    for i, line in enumerate(data):
-        if line.startswith("Iter"):
-            loss_lines.append(line)
+        reg = float(reg_seg.split(reg_name + " ")[-1][:-1])
+        reg_data[reg_name].append(loss / reg)
 
-    for line in loss_lines:
-        split = line.split(" | ")
-        loss, reg = float(split[-2].split("Loss ")[-1][:-1]), float(split[-1].split("Regularization ")[-1][:-1])
-        losses[reg_type].append(loss / reg)
-
-for reg in losses.keys():
-    print("Reg: %s, Loss/Reg: %.3f" % (reg, np.mean(losses[reg])))
+for reg in reg_data:
+    print("Reg: %s, Loss/Reg: %.3f" % (reg, np.mean(reg_data[reg])))
