@@ -26,7 +26,7 @@ parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=2)
 parser.add_argument('--batch_size', type=int, default=20)
-parser.add_argument('--niters', type=int, default=20)
+parser.add_argument('--niters', type=int, default=1000)
 parser.add_argument('--lam', type=float, default=1)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
@@ -346,12 +346,11 @@ if __name__ == "__main__":
             """
             print(*args, file=sys.stderr, **kwargs)
 
+        num_lam = 5
         hyperparams = {
                        "none": [0],
-                       "r0": [0],
-                       "r1": [0]
-                       # "r0": np.linspace(0, 2 * 0.057, 5)[1:],
-                       # "r1": np.linspace(0, 2 * 0.265, 5)[1:]
+                       "r0": np.linspace(0, 2 * 0.022, num_lam + 1)[1:],
+                       "r1": np.linspace(0, 2 * 0.477, num_lam + 1)[1:]
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
