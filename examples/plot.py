@@ -16,27 +16,34 @@ config.update('jax_enable_x64', True)
 
 key = random.PRNGKey(0)
 
-dirname = "2019-09-17-18-32-38"
+dirname = "2019-09-19-21-28-26"
 results_path = "%s/results.txt" % dirname
 
 file = open(results_path, "r")
 
 lines = file.readlines()
 
+# get inds for one when new training starts
 inds = []
 for i, line in enumerate(lines):
     if line.startswith("Reg:"):
         inds.append(i)
 
+# parse data
 plot_points = {}
 for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
+    # get hyperparms for training
     split = lines[ind][len("Reg: "):].split("Lambda ")
     reg, lam = split[0][:-1], float(split[1][:-1])
+
+    # add to dict
     if reg not in plot_points:
         plot_points[reg] = {}
         plot_points[reg]["lam"] = []
         plot_points[reg]["loss"] = []
         plot_points[reg]["all_loss"] = {}
+        plot_points[reg]["all_r0"] = {}
+        plot_points[reg]["all_r1"] = {}
         plot_points[reg]["all_forward"] = {}
         plot_points[reg]["all_backward"] = {}
         plot_points[reg]["forward"] = []
@@ -45,17 +52,25 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
     plot_points[reg]["lam"].append(lam)
     data = lines[ind + 1:next_ind]
 
-    final_loss = float(data[-1].split(" | ")[-2].split("Loss ")[-1][:-1])
+    size = 20
+    final_losses = data[::-3][:size]
+    final_loss = np.mean([float(line.split(" | ")[2].split("Loss ")[-1][:-1]) for line in final_losses])
     plot_points[reg]["loss"].append(final_loss)
 
     nfe = []
     losses = []
+    r0 = []
+    r1 = []
     for line in data:
         if line.startswith("Iter"):
-            losses.append(float(line.split(" | ")[-2].split("Loss ")[-1][:-1]))
+            losses.append(float(line.split(" | ")[2].split("Loss ")[-1][:-1]))
+            r0.append(float(line.split(" | ")[3].split("r0 ")[-1][:-1]))
+            r1.append(float(line.split(" | ")[4].split("r1 ")[-1][:-1]))
         else:
             nfe.append(line)
     plot_points[reg]["all_loss"][lam] = losses
+    plot_points[reg]["all_r0"][lam] = r0
+    plot_points[reg]["all_r1"][lam] = r1
 
     forward = nfe[0::2]
     backward = nfe[1::2]
@@ -63,185 +78,203 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
         forward[i] = int(point.split("forward NFE: ")[-1][:-1])
     for i, point in enumerate(backward):
         backward[i] = int(point.split("backward NFE: ")[-1][:-1])
-    plot_points[reg]["all_forward"][lam] = forward[::20]
-    plot_points[reg]["all_backward"][lam] = backward[::20]
+    plot_points[reg]["all_forward"][lam] = forward
+    plot_points[reg]["all_backward"][lam] = backward
     plot_points[reg]["forward"].append(np.mean(forward))
     plot_points[reg]["backward"].append(np.mean(backward))
 
-fig, ax = plt.subplots()
-for reg in plot_points.keys():
-    x, y = plot_points[reg]["forward"], plot_points[reg]["loss"]
-    ax.plot(x, y, "-o", label=str(reg))
-    for i, txt in enumerate(plot_points[reg]["lam"]):
-        ax.annotate(txt, (x[i], y[i]))
 
-plt.legend()
-plt.xlabel("Forward NFE")
-plt.ylabel("Loss")
-plt.savefig("%s/forward.png" % dirname)
-plt.clf()
-plt.close(fig)
-
-fig, ax = plt.subplots()
-for reg in plot_points.keys():
-    x, y = plot_points[reg]["backward"], plot_points[reg]["loss"]
-    ax.plot(x, y, "-o", label=str(reg))
-    # for i, txt in enumerate(losses[reg]["lam"]):
-    #     ax.annotate(txt, (x[i], y[i]))
-
-plt.legend()
-plt.xlabel("Backward NFE")
-plt.ylabel("Loss")
-plt.savefig("%s/backward.png" % dirname)
-plt.clf()
-plt.close(fig)
-
-for reg in plot_points.keys():
-    print("Reg: %s" % reg)
-    print(plot_points[reg]["lam"])
-    print(plot_points[reg]["forward"])
-    print(plot_points[reg]["backward"])
-    print("")
-
-
-for reg in plot_points.keys():
+def pareto_plot(nfe_type, xaxis):
+    """
+    Create pareto plot.
+    """
     fig, ax = plt.subplots()
-    for lam in plot_points[reg]["all_forward"].keys():
-        x, y = zip(*enumerate(plot_points[reg]["all_forward"][lam]))
-        x = 20 * np.array(x)
-        ax.plot(x, y, label=lam)
+    for reg in plot_points:
+        x, y = plot_points[reg][nfe_type], plot_points[reg]["loss"]
+        ax.plot(x, y, "-o", label=str(reg))
+        for i, txt in enumerate(plot_points[reg]["lam"]):
+            ax.annotate(txt, (x[i], y[i]))
 
     plt.legend()
-    plt.title("Reg: %s" % reg)
-    plt.xlabel("Training")
-    plt.ylabel("Forward NFE")
-    plt.savefig("%s/%s_all_forward.png" % (dirname, reg))
-    plt.clf()
-    plt.close(fig)
-
-
-for reg in plot_points.keys():
-    fig, ax = plt.subplots()
-    for lam in plot_points[reg]["all_backward"].keys():
-        x, y = zip(*enumerate(plot_points[reg]["all_backward"][lam]))
-        x = 20 * np.array(x)
-        ax.plot(x, y, label=lam)
-
-    plt.legend()
-    plt.title("Reg: %s" % reg)
-    plt.xlabel("Training")
-    plt.ylabel("Backward NFE")
-    plt.savefig("%s/%s_all_backward.png" % (dirname, reg))
-    plt.clf()
-    plt.close(fig)
-
-for reg in plot_points.keys():
-    fig, ax = plt.subplots()
-    for lam in plot_points[reg]["all_loss"].keys():
-        x, y = zip(*enumerate(plot_points[reg]["all_loss"][lam]))
-        x = 20 * np.array(x)
-        ax.plot(x, y, label=lam)
-
-    plt.legend()
-    plt.title("Reg: %s" % reg)
-    plt.xlabel("Training")
+    plt.xlabel(xaxis)
     plt.ylabel("Loss")
-    plt.savefig("%s/%s_loss.png" % (dirname, reg))
+    plt.savefig("%s/pareto_%s.png" % (dirname, nfe_type))
     plt.clf()
     plt.close(fig)
 
-# plot the dynamics
 
-import jax.numpy as np
-
-true_y0 = np.array([2., 0.])  # (D,)
-t = np.linspace(0., 25., 1000)
-true_A = np.array([[-0.1, 2.0], [-2.0, -0.1]])
+pareto_plot("forward", "Forward NFE")
+pareto_plot("backward", "Backward NFE")
 
 
-def true_func(y, t):
+def moving_average(a, n):
     """
-    True dynamics function.
+    Calculate moving average over window of size n.
+    Credit: stackoverflow.com/questions/14313510/how-to-calculate-moving-average-using-numpy
     """
-    return np.matmul(y ** 3, true_A)
+    ret = np.cumsum(a, dtype=float)
+    ret[n:] = ret[n:] - ret[:-n]
+    return ret[n - 1:] / n
 
 
-true_y, _ = odeint(true_func, (), true_y0, t, atol=1e-8, rtol=1e-8)
-
-# expand to batched version for use in testing
-true_y0 = np.expand_dims(true_y0, axis=0)
-
-# set up input
-r0 = np.zeros((1, 1))
-true_y0_r0 = np.concatenate((true_y0, r0), axis=1)
-flat_true_y0_r0, ravel_true_y0_r0 = ravel_pytree(true_y0_r0)
-
-# set up MLP
-init_random_params, predict = stax.serial(
-    Dense(50), Tanh,
-    Dense(2)
-)
-
-_, init_params = init_random_params(key, (-1, 2))
-
-_, ravel_params = ravel_pytree(init_params)
+window_size = 20
 
 
-def test_reg_dynamics(y_r, t, *args):
+def train_plot(yaxis_val, yaxis_name):
     """
-    Augmented dynamics to implement regularization. (on test)
+    Plot progression over training.
     """
+    for reg in plot_points:
+        fig, ax = plt.subplots()
+        for lam in plot_points[reg][yaxis_val]:
+            x, y = zip(*enumerate(moving_average(plot_points[reg][yaxis_val][lam], window_size)))
+            x = np.array(x) + len(plot_points[reg][yaxis_val][lam]) - window_size + 1
+            ax.plot(x, y, label=lam)
 
-    flat_params = args
-    params = ravel_params(np.array(flat_params))
-
-    # separate out state from augmented
-    y_r = ravel_true_y0_r0(y_r)
-    y, r = y_r[:, :2], y_r[:, 2]
-
-    predictions = predict(params, y ** 3)
-
-    if reg == "state":
-        regularization = np.sum(y ** 2, axis=1) ** 0.5
-    elif reg == "dynamics":
-        regularization = np.sum(predictions ** 2, axis=1) ** 0.5
-    else:
-        regularization = np.zeros(1)
-
-    regularization = np.expand_dims(regularization, axis=1)
-    pred_reg = np.concatenate((predictions, regularization), axis=1)
-    flat_pred_reg, _ = ravel_pytree(pred_reg)
-    return flat_pred_reg
+        plt.legend()
+        plt.title("Reg: %s" % reg)
+        plt.xlabel("Training")
+        plt.ylabel(yaxis_name)
+        plt.savefig("%s/train_%s_%s.png" % (dirname, reg, yaxis_val))
+        plt.clf()
+        plt.close(fig)
 
 
-for reg in plot_points.keys():
-    for lam in plot_points[reg]["lam"]:
-        for itr in range(100, 1001, 100):
-            # load params
-            param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
-            param_file = open(param_filename, "rb")
-            params = pickle.load(param_file)
-            fargs = params
+train_plot("all_forward", "Forward NFE")
+train_plot("all_backward", "Backward NFE")
+train_plot("all_loss", "Loss")
+train_plot("all_r0", "r0")
+train_plot("all_r1", "r1")
 
-            # get predictions
-            pred_y_r, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_r0, t, atol=1e-8, rtol=1e-8)
 
-            # plot each dim
-            fig, ax = plt.subplots()
-            for i in range(pred_y_r.shape[1] - 1):
-                pred_y = pred_y_r[:, i]
-                x, y = t, pred_y
-                ax.plot(x, y, label=i)
+def comp_train_plot(yaxis_val, yaxis_name):
+    """
+    Compare metric evolution over training on diff methods.
+    """
+    fig, ax = plt.subplots()
+    for reg in plot_points:
+        for lam in plot_points[reg][yaxis_val]:
+            x, y = zip(*enumerate(moving_average(plot_points[reg][yaxis_val][lam], window_size)))
+            x = np.array(x) + len(plot_points[reg][yaxis_val][lam]) - window_size + 1
+            ax.plot(x, y, label=str(reg) + " " + str(lam))
 
-            x, y = t, pred_y_r[:, -1]
-            ax.plot(x, y, label="reg")
-            plt.legend()
-            plt.title("Reg: %s" % reg)
-            plt.xlabel("Time")
-            plt.ylabel("state")
-            figname = "%s/reg_%s_lam_%.4e_%d.png" % (dirname, reg, lam, itr)
-            plt.savefig(figname)
-            plt.clf()
-            plt.close(fig)
+    plt.legend()
+    plt.xlabel("Training")
+    plt.ylabel(yaxis_name)
+    plt.savefig("%s/comp_train_%s.png" % (dirname, yaxis_val))
+    plt.clf()
+    plt.close(fig)
 
-            param_file.close()
+
+comp_train_plot("all_r0", "r0")
+comp_train_plot("all_r1", "r1")
+
+
+# import jax.numpy as np
+#
+# DATA_SIZE = 1000
+# REGS = ['r0', 'r1']
+# NUM_REGS = len(REGS)
+#
+# true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, DATA_SIZE), axis=1), 2, axis=1)  # (N, D)
+# true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
+#                           np.expand_dims(true_y0[:, 1] ** 3, axis=1)),
+#                          axis=1)
+# true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
+#                         np.expand_dims(true_y1, axis=0)),
+#                         axis=0)  # (T, N, D)
+# t = np.linspace(0., 25., num=1000)  # (T)
+#
+# # set up input
+# r0 = np.zeros((DATA_SIZE, 1))
+# allr = np.zeros((DATA_SIZE, NUM_REGS))
+# true_y0_t_r0_allr = np.concatenate((true_y0,
+#                                     np.expand_dims(
+#                                         np.repeat(t[0], DATA_SIZE), axis=1),
+#                                     r0,
+#                                     allr), axis=1)
+# flat_true_y0_t_r0_allr, ravel_true_y0_t_r0_allr = ravel_pytree(true_y0_t_r0_allr)
+#
+# # set up MLP
+# init_random_params, predict = stax.serial(
+#     Dense(50), Tanh,
+#     Dense(2)
+# )
+#
+# _, init_params = init_random_params(key, (-1, 3))
+# _, ravel_params = ravel_pytree(init_params)
+#
+#
+# def test_reg_dynamics(y_r, t, *args):
+#     """
+#     Augmented dynamics to implement regularization. (on test)
+#     """
+#
+#     flat_params = args
+#     params = ravel_params(np.array(flat_params))
+#
+#     # separate out state from augmented
+#     y_r = ravel_true_y0_t_r0_allr(y_r)
+#     y_t = y_r[:, :3]
+#     y = y_t[:, :-1]
+#
+#     predictions_y = predict(params, y_t)
+#     predictions = np.concatenate((predictions_y,
+#                                   np.ones((DATA_SIZE, 1))),
+#                                  axis=1)
+#
+#     r0 = np.sum(y ** 2, axis=1) ** 0.5
+#     r1 = np.sum(predictions_y ** 2, axis=1) ** 0.5
+#     if reg == "r0":
+#         regularization = r0
+#     elif reg == "r1":
+#         regularization = r1
+#     else:
+#         regularization = np.zeros(DATA_SIZE)
+#
+#     pred_reg = np.concatenate((predictions,
+#                                np.expand_dims(regularization, axis=1),
+#                                np.expand_dims(r0, axis=1),
+#                                np.expand_dims(r1, axis=1)),
+#                               axis=1)
+#     flat_pred_reg, _ = ravel_pytree(pred_reg)
+#     return flat_pred_reg
+#
+#
+# for reg in plot_points:
+#     for lam in plot_points[reg]["lam"]:
+#         for itr in range(100, 1001, 100):
+#             # load params
+#             param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
+#             param_file = open(param_filename, "rb")
+#             params = pickle.load(param_file)
+#             fargs = params
+#
+#             pred_y_t_r_allr, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0_allr, t, atol=1e-8, rtol=1e-8)
+#
+#             pred_y0_t_r_allr, pred_y1_t_r_allr = pred_y_t_r_allr[0, :], pred_y_t_r_allr[1, :]
+#             pred_y0_t_r_allr = ravel_true_y0_t_r0_allr(pred_y0_t_r_allr)
+#             pred_y1_t_r_allr = ravel_true_y0_t_r0_allr(pred_y1_t_r_allr)
+#             pred_y = np.concatenate((np.expand_dims(pred_y0_t_r_allr[:, :2], axis=0),
+#                                      np.expand_dims(pred_y1_t_r_allr[:, :2], axis=0)),
+#                                     axis=0)
+#
+#             # plot each dim
+#             fig, ax = plt.subplots()
+#             # for i in range(pred_y_r.shape[1] - 1):
+#             #     pred_y = pre
+#             #     x, y = t, pred_y
+#             #     ax.plot(x, y, label=i)
+#
+#             x, y = t, pred_y_r[:, -1]
+#             ax.plot(x, y, label="reg")
+#             plt.legend()
+#             plt.title("Reg: %s" % reg)
+#             plt.xlabel("Time")
+#             plt.ylabel("state")
+#             figname = "%s/reg_%s_lam_%.4e_%d.png" % (dirname, reg, lam, itr)
+#             plt.savefig(figname)
+#             plt.clf()
+#             plt.close(fig)
+#
+#             param_file.close()
