@@ -70,6 +70,9 @@ def run(reg, lam):
     """
     Run the neural ODEs method.
     """
+    # TODO: check for any more globals set only in one if (so that can run from shell)
+    #   e.g. dirname
+    #   it's easy to check this, since all the command line args have defaults
     print("Reg: %s Lambda %.4e" % (reg, lam))
     ii = 0
 
@@ -87,8 +90,11 @@ def run(reg, lam):
 
     r0 = np.zeros((parse_args.batch_size, 1))
     batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
+
+    # parse_args.batch_size * (D + 1) |-> (parse_args.batch_size, D + 1)
     _, ravel_batch_y0_r0 = ravel_pytree(batch_y0_r0)
 
+    # parse_args.batch_size * D  |-> (parse_args.batch_size, D)
     _, ravel_batch_y0 = ravel_pytree(batch_y0)
 
     batch_y0_t = np.concatenate((batch_y0,
@@ -97,17 +103,24 @@ def run(reg, lam):
                                      axis=1)
                                  ),
                                 axis=1)
+    # parse_args.batch_size * (D + 1) |-> (parse_args.batch_size, D + 1)
     _, ravel_batch_y0_t = ravel_pytree(batch_y0_t)
 
     batch_y0_t_r0 = np.concatenate((batch_y0_t, r0), axis=1)
+
+    # parse_args.batch_size * (D + 2) |-> (parse_args.batch_size, D + 2)
     _, ravel_batch_y0_t_r0 = ravel_pytree(batch_y0_t_r0)
 
     allr0 = np.zeros((parse_args.batch_size, NUM_REGS))
     batch_y0_t_r0_allr0 = np.concatenate((batch_y0_t, r0, allr0), axis=1)
+
+    # parse_args.batch_size * (D + 2 + NUM_REGS) |-> (parse_args.batch_size, D + 2 + NUM_REGS)
     _, ravel_batch_y0_t_r0_allr0 = ravel_pytree(batch_y0_t_r0_allr0)
 
     r = np.zeros((parse_args.batch_time, parse_args.batch_size, 1))
     batch_y_r = np.concatenate((batch_y, r), axis=2)
+
+    # parse_args.batch_time * parse_args.batch_size * (D + 1) |-> (parse_args.batch_time, parse_args.batch_size, D + 1)
     _, ravel_batch_y_r = ravel_pytree(batch_y_r)
 
     batch_y_t_r = np.concatenate((batch_y,
@@ -116,6 +129,8 @@ def run(reg, lam):
                                       axis=2),
                                   r),
                                  axis=2)
+
+    # parse_args.batch_time * parse_args.batch_size * (D + 2) |-> (parse_args.batch_time, parse_args.batch_size, D + 2)
     _, ravel_batch_y_t_r = ravel_pytree(batch_y_t_r)
 
     allr = np.zeros((parse_args.batch_time, parse_args.batch_size, NUM_REGS))
@@ -126,9 +141,14 @@ def run(reg, lam):
                                        r,
                                        allr),
                                       axis=2)
+
+    # parse_args.batch_time * parse_args.batch_size * (D + 2 + NUM_REGS) |->
+    #                                                   (parse_args.batch_time, parse_args.batch_size, D + 2 + NUM_REGS)
     _, ravel_batch_y_t_r_allr = ravel_pytree(batch_y_t_r_allr)
 
+    # parse_args.batch_size * D |-> (parse_args.batch_size, D)
     _, ravel_batch_y = ravel_pytree(batch_y)
+
     fargs = flat_params
 
     def dynamics(y_t, t, *args):
@@ -263,7 +283,12 @@ def run(reg, lam):
         pred_y_t_r_allr, _ = odeint(reg_dynamics, fargs, flat_batch_y0_t_r0_allr0, batch_t, atol=1e-8, rtol=1e-8)
         print("forward NFE: %d" % nfe)
 
+        # parse_args.batch_time * parse_args.batch_size * (D + 1) |->
+        #                                                       (parse_args.batch_time, parse_args.batch_size * (D + 1))
         _, ravel_pred_y_t = ravel_pytree(tmp_pred_y_t)
+
+        # (parse_args.batch_time * parse_args.batch_size * (D + 2 + NUM_REGS)) |->
+        #                                           (parse_args.batch_time, parse_args.batch_size * (D + 2 + NUM_REGS))
         _, ravel_pred_y_t_r_allr = ravel_pytree(pred_y_t_r_allr)
 
         pred_y_t_r_allr = ravel_batch_y_t_r_allr(pred_y_t_r_allr)
@@ -271,6 +296,9 @@ def run(reg, lam):
         pred_y_t_r = pred_y_t_r_allr[:, :, :4]
 
         pred_y_t = ravel_pred_y_t(pred_y_t)
+
+        # (parse_args.batch_time * parse_args.batch_size * (D + 2) |->
+        #                                                       (parse_args.batch_time, parse_args.batch_size, D + 2)
         _, ravel_pred_y_t_r = ravel_pytree(pred_y_t_r)
         pred_y_t_r_allr = ravel_pred_y_t_r_allr(pred_y_t_r_allr)
 
@@ -290,6 +318,21 @@ def run(reg, lam):
 
         if itr % parse_args.test_freq == 0:
             fargs = get_params(opt_state)
+
+            r = np.zeros((parse_args.batch_time, parse_args.data_size, 1))
+            allr = np.zeros((parse_args.batch_time, parse_args.data_size, NUM_REGS))
+            true_y_t_r_allr = np.concatenate((true_y,
+                                              np.expand_dims(
+                                                  np.tile(batch_t, (parse_args.data_size, 1)).T,
+                                                  axis=2),
+                                              r,
+                                              allr),
+                                             axis=2)
+
+            # parse_args.batch_time * parse_args.data_size * (D + 2 + NUM_REGS) |->
+            #                                           (parse_args.batch_time, parse_args.data_size, D + 2 + NUM_REGS)
+            _, ravel_true_y_t_r_allr = ravel_pytree(true_y_t_r_allr)
+
             r0 = np.zeros((parse_args.data_size, 1))
             allr = np.zeros((parse_args.data_size, NUM_REGS))
             true_y0_t_r0_allr = np.concatenate((true_y0,
@@ -297,20 +340,17 @@ def run(reg, lam):
                                                     np.repeat(t[0], parse_args.data_size), axis=1),
                                                 r0,
                                                 allr), axis=1)
+
+            # parse_args.data_size * (D + 2 + NUM_REGS) |-> (parse_args.data_size, D + 2 + NUM_REGS)
             flat_true_y0_t_r0_allr, ravel_true_y0_t_r0_allr = ravel_pytree(true_y0_t_r0_allr)
             pred_y_t_r_allr, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0_allr, t, atol=1e-8, rtol=1e-8)
 
-            pred_y0_t_r_allr, pred_y1_t_r_allr = pred_y_t_r_allr[0, :], pred_y_t_r_allr[1, :]
-            pred_y0_t_r_allr = ravel_true_y0_t_r0_allr(pred_y0_t_r_allr)
-            pred_y1_t_r_allr = ravel_true_y0_t_r0_allr(pred_y1_t_r_allr)
-            pred_y = np.concatenate((np.expand_dims(pred_y0_t_r_allr[:, :2], axis=0),
-                                     np.expand_dims(pred_y1_t_r_allr[:, :2], axis=0)),
-                                    axis=0)
-            pred_y_r = np.concatenate((np.expand_dims(pred_y0_t_r_allr[:, [0, 1, 3]], axis=0),
-                                       np.expand_dims(pred_y1_t_r_allr[:, [0, 1, 3]], axis=0)),
-                                      axis=0)
-            r0 = np.mean(pred_y1_t_r_allr[:, -2])
-            r1 = np.mean(pred_y_t_r_allr[:, -1])
+            pred_y_t_r_allr = ravel_true_y_t_r_allr(pred_y_t_r_allr)
+            pred_y = pred_y_t_r_allr[:, :, :2]
+            pred_y_r = pred_y_t_r_allr[:, :, [0, 1, 3]]
+
+            r0 = np.mean(pred_y_t_r_allr[1, :, -2])
+            r1 = np.mean(pred_y_t_r_allr[1, :, -1])
 
             loss = loss_fun(pred_y, true_y)
             total_loss = total_loss_fun(pred_y_r, true_y)
@@ -348,9 +388,9 @@ if __name__ == "__main__":
 
         num_lam = 5
         hyperparams = {
-                       "none": [0],
-                       "r0": np.linspace(0, 2 * 0.022, num_lam + 1)[1:],
-                       "r1": np.linspace(0, 2 * 0.477, num_lam + 1)[1:]
+                       # "none": [0],
+                       "r0": [100],
+                       "r1": [100]
                        }
         for reg in hyperparams.keys():
             for lam in hyperparams[reg]:
