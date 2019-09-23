@@ -245,14 +245,14 @@ def run(reg, lam):
         Loss function.
         """
         pred, reg = pred_y_r[:, :, :2], pred_y_r[:, :, 2]
-        return np.mean(np.abs(pred - target)) + lam * np.mean(reg)
+        return loss_fun(pred, target) + lam * np.mean(reg)
 
     @jax.jit
     def loss_fun(pred, target):
         """
         Mean absolute error.
         """
-        return np.mean(np.abs(pred - target))
+        return np.mean((pred - target) ** 2)
 
     ode_vjp = grad_odeint(dynamics, fargs)
     reg_ode_vjp = grad_odeint(reg_dynamics, fargs)
