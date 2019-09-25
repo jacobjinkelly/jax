@@ -41,9 +41,11 @@ config.update('jax_enable_x64', True)
 
 key = random.PRNGKey(0)
 
-true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, parse_args.data_size), axis=1), 2, axis=1)  # (N, D)
+D = 3
+true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, parse_args.data_size), axis=1), D, axis=1)  # (N, D)
 true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
-                          np.expand_dims(true_y0[:, 1] ** 3, axis=1)),
+                          np.expand_dims(true_y0[:, 1] ** 3, axis=1),
+                          np.expand_dims(true_y0[:, 2] ** 4, axis=1)),
                          axis=1)
 true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
                         np.expand_dims(true_y1, axis=0)),
@@ -52,6 +54,7 @@ t = np.array([0., 25.])  # (T)
 
 
 # TODO: make batching in terms of epochs
+#   See: https://github.com/google/jax/blob/master/examples/mnist_classifier.py
 def get_batch():
     """
     Get batch.
@@ -79,11 +82,13 @@ def run(reg, lam):
     # set up MLP
     init_random_params, predict = stax.serial(
         Dense(50), Tanh,
-        Dense(2)
+        Dense(D)
     )
 
-    output_shape, init_params = init_random_params(key, (-1, 3))
-    assert output_shape == (-1, 2)
+    output_shape, init_params = init_random_params(key, (-1, D + 1))
+    assert output_shape == (-1, D)
+
+    # define ravel objects
 
     flat_params, ravel_params = ravel_pytree(init_params)
     batch_y0, batch_t, batch_y = get_batch()
@@ -169,7 +174,7 @@ def run(reg, lam):
         flat_predictions, _ = ravel_pytree(predictions)
         return flat_predictions
 
-    def reg_dynamics(y_t_r, t, *args):
+    def reg_dynamics(y_t_r_allr, t, *args):
         """
         Augmented dynamics to implement regularization.
         """
@@ -178,8 +183,8 @@ def run(reg, lam):
         params = ravel_params(np.array(flat_params))
 
         # separate out state from augmented
-        y_r = ravel_batch_y0_t_r0_allr0(y_t_r)
-        y_t = y_r[:, :3]
+        y_t_r_allr = ravel_batch_y0_t_r0_allr0(y_t_r_allr)
+        y_t = y_t_r_allr[:, :D + 1]
         y = y_t[:, :-1]
 
         predictions_y = predict(params, y_t)
@@ -204,7 +209,7 @@ def run(reg, lam):
         flat_pred_reg, _ = ravel_pytree(pred_reg)
         return flat_pred_reg
 
-    def test_reg_dynamics(y_r, t, *args):
+    def test_reg_dynamics(y_t_r_allr, t, *args):
         """
         Augmented dynamics to implement regularization. (on test)
         """
@@ -213,8 +218,8 @@ def run(reg, lam):
         params = ravel_params(np.array(flat_params))
 
         # separate out state from augmented
-        y_r = ravel_true_y0_t_r0_allr(y_r)
-        y_t = y_r[:, :3]
+        y_t_r_allr = ravel_true_y0_t_r0_allr(y_t_r_allr)
+        y_t = y_t_r_allr[:, :D + 1]
         y = y_t[:, :-1]
 
         predictions_y = predict(params, y_t)
@@ -244,7 +249,7 @@ def run(reg, lam):
         """
         Loss function.
         """
-        pred, reg = pred_y_t_r[:, :, :2], pred_y_t_r[:, :, 3]
+        pred, reg = pred_y_t_r[:, :, :D], pred_y_t_r[:, :, D + 1]
         return loss_fun(pred, target) + lam * reg_loss(reg)
 
     @jax.jit
@@ -301,9 +306,9 @@ def run(reg, lam):
         _, ravel_pred_y_t_r_allr = ravel_pytree(pred_y_t_r_allr)
 
         pred_y_t_r_allr = ravel_batch_y_t_r_allr(pred_y_t_r_allr)
-        pred_y = pred_y_t_r_allr[:, :, :2]
-        pred_y_t = pred_y_t_r_allr[:, :, :3]
-        pred_y_t_r = pred_y_t_r_allr[:, :, :4]
+        pred_y = pred_y_t_r_allr[:, :, :D]
+        pred_y_t = pred_y_t_r_allr[:, :, :D + 1]
+        pred_y_t_r = pred_y_t_r_allr[:, :, :D + 2]
 
         # check that manual integration worked
         final_t = pred_y_t[:, :, -1]
@@ -346,10 +351,10 @@ def run(reg, lam):
                                                                     NUM_REGS))),
                                                          axis=2)
 
-            cotangent_mask = np.zeros((parse_args.batch_time, parse_args.batch_size, 2 + 2 + NUM_REGS))
+            cotangent_mask = np.zeros((parse_args.batch_time, parse_args.batch_size, D + 2 + NUM_REGS))
 
-            reg_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, 3], 1)
-            loss_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, [0, 1]], 1)
+            loss_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, :D], 1)
+            reg_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, D + 1], 1)
 
             loss_grad = reg_ode_vjp(ravel_pred_y_t_r_allr(manual_total_loss_grad_allr * loss_cotangent_mask),
                                     pred_y_t_r_allr, batch_t)[:-1][3]
@@ -387,8 +392,8 @@ def run(reg, lam):
             pred_y_t_r_allr, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0_allr, t, atol=1e-8, rtol=1e-8)
 
             pred_y_t_r_allr = ravel_true_y_t_r_allr(pred_y_t_r_allr)
-            pred_y = pred_y_t_r_allr[:, :, :2]
-            pred_y_t_r = pred_y_t_r_allr[:, :, :4]
+            pred_y = pred_y_t_r_allr[:, :, :D]
+            pred_y_t_r = pred_y_t_r_allr[:, :, :D + 2]
 
             r0 = np.mean(pred_y_t_r_allr[1, :, -2])
             r1 = np.mean(pred_y_t_r_allr[1, :, -1])
