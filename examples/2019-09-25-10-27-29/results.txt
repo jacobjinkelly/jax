@@ -1,0 +1,183 @@
+Reg: none Lambda 0.0000e+00
+forward NFE: 212
+backward NFE: 398
+Iter 0001 | Total (Regularized) Loss 392.297531 | Loss 392.297531 | Loss Grad Norm 6081.047218 | Reg Grad Norm 0.000000 | r0 464.336236 | r1 40.999352
+forward NFE: 176
+backward NFE: 566
+Iter 0002 | Total (Regularized) Loss 302.042519 | Loss 302.042519 | Loss Grad Norm 13821.782312 | Reg Grad Norm 0.000000 | r0 398.979474 | r1 37.146950
+forward NFE: 224
+backward NFE: 560
+Iter 0003 | Total (Regularized) Loss 267.011696 | Loss 267.011696 | Loss Grad Norm 4616.160099 | Reg Grad Norm 0.000000 | r0 364.571417 | r1 35.594238
+forward NFE: 278
+backward NFE: 572
+Iter 0004 | Total (Regularized) Loss 251.544771 | Loss 251.544771 | Loss Grad Norm 12474.004352 | Reg Grad Norm 0.000000 | r0 336.078428 | r1 33.742638
+forward NFE: 302
+backward NFE: 590
+Iter 0005 | Total (Regularized) Loss 246.068890 | Loss 246.068890 | Loss Grad Norm 12926.516510 | Reg Grad Norm 0.000000 | r0 340.282149 | r1 32.216905
+forward NFE: 284
+backward NFE: 602
+Iter 0006 | Total (Regularized) Loss 290.283365 | Loss 290.283365 | Loss Grad Norm 14840.526308 | Reg Grad Norm 0.000000 | r0 369.391507 | r1 33.419524
+forward NFE: 284
+backward NFE: 614
+Iter 0007 | Total (Regularized) Loss 291.034560 | Loss 291.034560 | Loss Grad Norm 7846.904792 | Reg Grad Norm 0.000000 | r0 370.894995 | r1 33.743687
+forward NFE: 284
+backward NFE: 596
+Iter 0008 | Total (Regularized) Loss 300.038766 | Loss 300.038766 | Loss Grad Norm 8055.449139 | Reg Grad Norm 0.000000 | r0 376.873086 | r1 34.359232
+forward NFE: 278
+backward NFE: 596
+Iter 0009 | Total (Regularized) Loss 293.161881 | Loss 293.161881 | Loss Grad Norm 6197.919819 | Reg Grad Norm 0.000000 | r0 373.466202 | r1 34.229360
+forward NFE: 284
+backward NFE: 560
+Iter 0010 | Total (Regularized) Loss 289.382575 | Loss 289.382575 | Loss Grad Norm 7670.333581 | Reg Grad Norm 0.000000 | r0 371.751236 | r1 34.252576
+forward NFE: 284
+backward NFE: 566
+Iter 0011 | Total (Regularized) Loss 297.624547 | Loss 297.624547 | Loss Grad Norm 11170.313827 | Reg Grad Norm 0.000000 | r0 378.977508 | r1 34.364797
+forward NFE: 290
+backward NFE: 590
+Iter 0012 | Total (Regularized) Loss 295.972648 | Loss 295.972648 | Loss Grad Norm 9344.462461 | Reg Grad Norm 0.000000 | r0 379.722110 | r1 34.432713
+forward NFE: 320
+backward NFE: 572
+Iter 0013 | Total (Regularized) Loss 325.901612 | Loss 325.901612 | Loss Grad Norm 9933.848946 | Reg Grad Norm 0.000000 | r0 399.547564 | r1 35.425517
+forward NFE: 290
+backward NFE: 578
+Iter 0014 | Total (Regularized) Loss 330.917733 | Loss 330.917733 | Loss Grad Norm 12817.105877 | Reg Grad Norm 0.000000 | r0 412.576182 | r1 34.987131
+forward NFE: 308
+backward NFE: 590
+Iter 0015 | Total (Regularized) Loss 406.817100 | Loss 406.817100 | Loss Grad Norm 9816.566691 | Reg Grad Norm 0.000000 | r0 452.521849 | r1 37.879739
+forward NFE: 296
+backward NFE: 572
+Iter 0016 | Total (Regularized) Loss 363.484673 | Loss 363.484673 | Loss Grad Norm 4028.246063 | Reg Grad Norm 0.000000 | r0 431.619641 | r1 36.601252
+forward NFE: 308
+backward NFE: 572
+Iter 0017 | Total (Regularized) Loss 411.615165 | Loss 411.615165 | Loss Grad Norm 6169.118687 | Reg Grad Norm 0.000000 | r0 455.375683 | r1 38.476863
+forward NFE: 308
+backward NFE: 560
+Iter 0018 | Total (Regularized) Loss 364.105482 | Loss 364.105482 | Loss Grad Norm 3215.658651 | Reg Grad Norm 0.000000 | r0 434.044856 | r1 36.860430
+forward NFE: 314
+backward NFE: 566
+Iter 0019 | Total (Regularized) Loss 377.006298 | Loss 377.006298 | Loss Grad Norm 5064.203581 | Reg Grad Norm 0.000000 | r0 442.740531 | r1 37.205741
+forward NFE: 314
+backward NFE: 542
+Iter 0020 | Total (Regularized) Loss 367.694661 | Loss 367.694661 | Loss Grad Norm 5007.811389 | Reg Grad Norm 0.000000 | r0 437.121661 | r1 37.237235
+Reg: r0 Lambda 1.0000e+02
+forward NFE: 212
+backward NFE: 398
+Iter 0001 | Total (Regularized) Loss 20122.631695 | Loss 286.365472 | Loss Grad Norm 6081.047281 | Reg Grad Norm 131414.390283 | r0 396.725324 | r1 35.473636
+forward NFE: 194
+backward NFE: 614
+Iter 0002 | Total (Regularized) Loss 18681.035905 | Loss 268.338512 | Loss Grad Norm 13556.533145 | Reg Grad Norm 548203.334322 | r0 368.253948 | r1 35.957855
+forward NFE: 236
+backward NFE: 608
+Iter 0003 | Total (Regularized) Loss 17402.294808 | Loss 253.834499 | Loss Grad Norm 14401.570715 | Reg Grad Norm 587774.747608 | r0 342.969206 | r1 34.233150
+forward NFE: 302
+backward NFE: 596
+Iter 0004 | Total (Regularized) Loss 17308.674240 | Loss 247.462312 | Loss Grad Norm 7188.618989 | Reg Grad Norm 285824.110979 | r0 341.224239 | r1 32.751326
+forward NFE: 278
+backward NFE: 596
+Iter 0005 | Total (Regularized) Loss 17831.227990 | Loss 260.245274 | Loss Grad Norm 9978.351618 | Reg Grad Norm 338644.672506 | r0 351.419654 | r1 32.607274
+forward NFE: 278
+backward NFE: 596
+Iter 0006 | Total (Regularized) Loss 19311.086528 | Loss 307.227362 | Loss Grad Norm 12767.331038 | Reg Grad Norm 414883.254938 | r0 380.077183 | r1 33.789038
+forward NFE: 278
+backward NFE: 590
+Iter 0007 | Total (Regularized) Loss 19069.547322 | Loss 300.570352 | Loss Grad Norm 6556.142937 | Reg Grad Norm 188362.121815 | r0 375.379539 | r1 33.650691
+forward NFE: 278
+backward NFE: 566
+Iter 0008 | Total (Regularized) Loss 18640.350034 | Loss 289.117358 | Loss Grad Norm 6035.825276 | Reg Grad Norm 117252.024811 | r0 367.024654 | r1 33.281679
+forward NFE: 272
+backward NFE: 572
+Iter 0009 | Total (Regularized) Loss 18130.092857 | Loss 273.190464 | Loss Grad Norm 5327.679455 | Reg Grad Norm 98845.653637 | r0 357.138048 | r1 32.473631
+forward NFE: 284
+backward NFE: 560
+Iter 0010 | Total (Regularized) Loss 17807.238017 | Loss 260.378569 | Loss Grad Norm 7291.542375 | Reg Grad Norm 149757.521170 | r0 350.937189 | r1 31.673856
+forward NFE: 284
+backward NFE: 566
+Iter 0011 | Total (Regularized) Loss 17703.826627 | Loss 256.468976 | Loss Grad Norm 9044.037220 | Reg Grad Norm 123515.394282 | r0 348.947153 | r1 31.105552
+forward NFE: 290
+backward NFE: 572
+Iter 0012 | Total (Regularized) Loss 17463.832836 | Loss 249.312854 | Loss Grad Norm 7200.533111 | Reg Grad Norm 114107.436972 | r0 344.290400 | r1 30.442737
+forward NFE: 278
+backward NFE: 590
+Iter 0013 | Total (Regularized) Loss 17111.007816 | Loss 239.668786 | Loss Grad Norm 7350.514230 | Reg Grad Norm 66540.730352 | r0 337.426781 | r1 29.777388
+forward NFE: 266
+backward NFE: 578
+Iter 0014 | Total (Regularized) Loss 17478.436649 | Loss 249.308718 | Loss Grad Norm 12968.445340 | Reg Grad Norm 169479.166439 | r0 344.582559 | r1 29.612089
+forward NFE: 284
+backward NFE: 548
+Iter 0015 | Total (Regularized) Loss 17595.687346 | Loss 251.245683 | Loss Grad Norm 10091.773297 | Reg Grad Norm 219467.492114 | r0 346.888833 | r1 29.490662
+forward NFE: 278
+backward NFE: 578
+Iter 0016 | Total (Regularized) Loss 16533.110312 | Loss 220.887671 | Loss Grad Norm 4573.856001 | Reg Grad Norm 71724.917152 | r0 326.244453 | r1 28.096389
+forward NFE: 278
+backward NFE: 548
+Iter 0017 | Total (Regularized) Loss 15941.335000 | Loss 202.643107 | Loss Grad Norm 6210.524274 | Reg Grad Norm 60916.452644 | r0 314.773838 | r1 27.014630
+forward NFE: 284
+backward NFE: 572
+Iter 0018 | Total (Regularized) Loss 15640.144319 | Loss 194.172762 | Loss Grad Norm 6074.465249 | Reg Grad Norm 77167.197968 | r0 308.919431 | r1 26.425046
+forward NFE: 278
+backward NFE: 536
+Iter 0019 | Total (Regularized) Loss 15567.454636 | Loss 190.799450 | Loss Grad Norm 8464.572500 | Reg Grad Norm 90917.578259 | r0 307.533104 | r1 25.809461
+forward NFE: 284
+backward NFE: 578
+Iter 0020 | Total (Regularized) Loss 14800.437055 | Loss 171.358499 | Loss Grad Norm 5616.705889 | Reg Grad Norm 71757.182776 | r0 292.581571 | r1 24.778830
+Reg: r1 Lambda 1.0000e+02
+forward NFE: 212
+backward NFE: 398
+Iter 0001 | Total (Regularized) Loss 2266.330460 | Loss 343.838293 | Loss Grad Norm 6081.047272 | Reg Grad Norm 13400.500852 | r0 438.196566 | r1 38.449843
+forward NFE: 182
+backward NFE: 566
+Iter 0002 | Total (Regularized) Loss 1971.605981 | Loss 273.186518 | Loss Grad Norm 5396.825916 | Reg Grad Norm 12581.881166 | r0 389.563974 | r1 33.968389
+forward NFE: 188
+backward NFE: 554
+Iter 0003 | Total (Regularized) Loss 2020.290378 | Loss 273.928470 | Loss Grad Norm 5404.871688 | Reg Grad Norm 24086.249802 | r0 404.089681 | r1 34.927238
+forward NFE: 212
+backward NFE: 524
+Iter 0004 | Total (Regularized) Loss 2135.776948 | Loss 319.819336 | Loss Grad Norm 9537.040338 | Reg Grad Norm 13978.524972 | r0 416.177653 | r1 36.319152
+forward NFE: 206
+backward NFE: 524
+Iter 0005 | Total (Regularized) Loss 2138.996371 | Loss 344.566047 | Loss Grad Norm 14062.269101 | Reg Grad Norm 15387.107589 | r0 417.019666 | r1 35.888606
+forward NFE: 194
+backward NFE: 548
+Iter 0006 | Total (Regularized) Loss 2560.728538 | Loss 466.184353 | Loss Grad Norm 8774.637903 | Reg Grad Norm 20559.084685 | r0 488.810714 | r1 41.890884
+forward NFE: 206
+backward NFE: 518
+Iter 0007 | Total (Regularized) Loss 2240.268967 | Loss 390.251239 | Loss Grad Norm 13346.250446 | Reg Grad Norm 17373.654670 | r0 441.631823 | r1 37.000355
+forward NFE: 212
+backward NFE: 524
+Iter 0008 | Total (Regularized) Loss 2494.187310 | Loss 444.520457 | Loss Grad Norm 8569.298083 | Reg Grad Norm 56253.616766 | r0 463.386101 | r1 40.993337
+forward NFE: 242
+backward NFE: 524
+Iter 0009 | Total (Regularized) Loss 2291.089177 | Loss 399.013111 | Loss Grad Norm 17587.284721 | Reg Grad Norm 15767.379544 | r0 441.797308 | r1 37.841521
+forward NFE: 236
+backward NFE: 542
+Iter 0010 | Total (Regularized) Loss 2559.357801 | Loss 461.425165 | Loss Grad Norm 8511.757788 | Reg Grad Norm 58335.214470 | r0 465.209229 | r1 41.958653
+forward NFE: 248
+backward NFE: 506
+Iter 0011 | Total (Regularized) Loss 2354.028244 | Loss 414.387148 | Loss Grad Norm 20535.527279 | Reg Grad Norm 19282.765645 | r0 447.358560 | r1 38.792822
+forward NFE: 254
+backward NFE: 542
+Iter 0012 | Total (Regularized) Loss 2393.990804 | Loss 419.877108 | Loss Grad Norm 14531.751147 | Reg Grad Norm 43502.585208 | r0 446.769328 | r1 39.482274
+forward NFE: 242
+backward NFE: 494
+Iter 0013 | Total (Regularized) Loss 2414.279655 | Loss 418.885642 | Loss Grad Norm 16398.448375 | Reg Grad Norm 37870.172200 | r0 444.994460 | r1 39.907880
+forward NFE: 242
+backward NFE: 482
+Iter 0014 | Total (Regularized) Loss 2395.576444 | Loss 424.187790 | Loss Grad Norm 22849.354302 | Reg Grad Norm 9291.952913 | r0 447.801772 | r1 39.427773
+forward NFE: 284
+backward NFE: 530
+Iter 0015 | Total (Regularized) Loss 2427.746996 | Loss 426.800624 | Loss Grad Norm 17927.909707 | Reg Grad Norm 45153.672427 | r0 449.175327 | r1 40.018927
+forward NFE: 242
+backward NFE: 506
+Iter 0016 | Total (Regularized) Loss 2372.819561 | Loss 411.722813 | Loss Grad Norm 22780.724118 | Reg Grad Norm 26590.925544 | r0 441.756936 | r1 39.221935
+forward NFE: 266
+backward NFE: 512
+Iter 0017 | Total (Regularized) Loss 2374.508610 | Loss 411.090302 | Loss Grad Norm 21861.791498 | Reg Grad Norm 35034.211207 | r0 441.370881 | r1 39.268366
+forward NFE: 260
+backward NFE: 500
+Iter 0018 | Total (Regularized) Loss 2357.927592 | Loss 409.048007 | Loss Grad Norm 22764.608886 | Reg Grad Norm 20884.452743 | r0 439.231402 | r1 38.977592
+forward NFE: 272
+backward NFE: 470
+Iter 0019 | Total (Regularized) Loss 2367.944223 | Loss 411.085332 | Loss Grad Norm 20098.650693 | Reg Grad Norm 41318.457291 | r0 439.751124 | r1 39.137178
+forward NFE: 278
+backward NFE: 470
+Iter 0020 | Total (Regularized) Loss 2297.168796 | Loss 392.566904 | Loss Grad Norm 21555.326301 | Reg Grad Norm 22277.321438 | r0 429.325191 | r1 38.092038
