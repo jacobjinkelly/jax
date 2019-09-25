@@ -7,7 +7,9 @@ from __future__ import division
 from __future__ import print_function
 
 import argparse
+import os
 import pickle
+import sys
 
 import jax
 from jax.experimental import stax, optimizers
@@ -27,10 +29,10 @@ parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=2)
 parser.add_argument('--batch_size', type=int, default=20)
 parser.add_argument('--nepochs', type=int, default=50)
-parser.add_argument('--lam', type=float, default=1)
+parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
-parser.add_argument('--save_freq', type=int, default=100)
+parser.add_argument('--dirname', type=str, default='tmp')
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -62,14 +64,12 @@ def get_batch(shuffled_inds, batch):
     return batch_y0, batch_t, batch_y
 
 
-def run(reg, lam, key):
+def run(reg, lam, key, dirname):
     """
     Run the neural ODEs method.
     """
-    # TODO: check for any more globals set only in one if (so that can run from shell)
-    #   e.g. dirname
-    #   it's easy to check this, since all the command line args have defaults
-    print("Reg: %s Lambda %.4e" % (reg, lam))
+    print("Reg: %s\tLambda %.4e" % (reg, lam))
+    print("Reg: %s\tLambda %.4e" % (reg, lam), file=sys.stderr)
 
     # set up MLP
     init_random_params, predict = stax.serial(
@@ -406,47 +406,18 @@ def run(reg, lam, key):
                       'Loss Grad Norm {:.6f} | Reg Grad Norm {:.6f} | r0 {:.6f} | r1 {:.6f}'.
                       format(itr, total_loss, loss,
                              loss_grad_norm, reg_grad_norm, r0, r1))
-                eprint('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | '
-                       'Loss Grad Norm {:.6f} | Reg Grad Norm {:.6f} | r0 {:.6f} | r1 {:.6f}'.
-                       format(itr, total_loss, loss,
-                              loss_grad_norm, reg_grad_norm, r0, r1))
+                print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | '
+                      'Loss Grad Norm {:.6f} | Reg Grad Norm {:.6f} | r0 {:.6f} | r1 {:.6f}'.
+                      format(itr, total_loss, loss,
+                             loss_grad_norm, reg_grad_norm, r0, r1),
+                      file=sys.stderr)
 
-            if itr % parse_args.save_freq == 0:
-                param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
-                outfile = open(param_filename, "wb")
-                pickle.dump(fargs, outfile)
-                outfile.close()
+        param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, (epoch + 1) * batch_per_epoch)
+        outfile = open(param_filename, "wb")
+        pickle.dump(fargs, outfile)
+        outfile.close()
 
 
 if __name__ == "__main__":
-    within_python = True
-    if within_python:
-        import os
-        import datetime
-        import sys
-
-        dirname = datetime.datetime.now().strftime("%F-%H-%M-%S")
-        os.mkdir(dirname)
-        filename = "%s/results.txt" % dirname
-        results_file = open(filename, "w")
-        sys.stdout = results_file
-
-        def eprint(*args, **kwargs):
-            """
-            Print to stderr.
-            """
-            print(*args, file=sys.stderr, **kwargs)
-
-        num_lam = 5
-        hyperparams = {
-                       "none": [0],
-                       "r0": [100],
-                       "r1": [100]
-                       }
-        for reg in hyperparams:
-            for lam in hyperparams[reg]:
-                eprint("Reg: %s\tLambda %.4e" % (reg, lam))
-                run(str(reg), lam, random.PRNGKey(0))
-        results_file.close()
-    else:
-        run(parse_args.reg, parse_args.lam, random.PRNGKey(0))
+    assert os.path.exists(parse_args.dirname)
+    run(parse_args.reg, parse_args.lam, random.PRNGKey(0), parse_args.dirname)
