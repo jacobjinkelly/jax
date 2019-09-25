@@ -305,6 +305,10 @@ def run(reg, lam):
         pred_y_t = pred_y_t_r_allr[:, :, :3]
         pred_y_t_r = pred_y_t_r_allr[:, :, :4]
 
+        # check that manual integration worked
+        final_t = pred_y_t[:, :, -1]
+        assert np.allclose(final_t, np.tile(batch_t, (parse_args.batch_size, 1)).T)
+
         pred_y_t = ravel_pred_y_t(pred_y_t)
 
         # (parse_args.batch_time * parse_args.batch_size * (D + 2) |->
