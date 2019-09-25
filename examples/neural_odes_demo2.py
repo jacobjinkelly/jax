@@ -240,12 +240,19 @@ def run(reg, lam):
         return flat_pred_reg
 
     @jax.jit
-    def total_loss_fun(pred_y_r, target):
+    def total_loss_fun(pred_y_t_r, target):
         """
         Loss function.
         """
-        pred, reg = pred_y_r[:, :, :2], pred_y_r[:, :, 2]
-        return loss_fun(pred, target) + lam * np.mean(reg)
+        pred, reg = pred_y_t_r[:, :, :2], pred_y_t_r[:, :, 3]
+        return loss_fun(pred, target) + lam * reg_loss(reg)
+
+    @jax.jit
+    def reg_loss(reg):
+        """
+        Regularization loss function.
+        """
+        return np.mean(reg)
 
     @jax.jit
     def loss_fun(pred, target):
@@ -256,7 +263,9 @@ def run(reg, lam):
 
     ode_vjp = grad_odeint(dynamics, fargs)
     reg_ode_vjp = grad_odeint(reg_dynamics, fargs)
-    grad_loss_fun = jax.jit(grad(total_loss_fun))
+    grad_total_loss_fun = jax.jit(grad(total_loss_fun))
+    grad_loss_fun = jax.jit(grad(loss_fun))
+    grad_reg_loss_fun = jax.jit(grad(reg_loss))
 
     opt_init, opt_update, get_params = optimizers.rmsprop(step_size=1e-3, gamma=0.99)
 
@@ -292,6 +301,7 @@ def run(reg, lam):
         _, ravel_pred_y_t_r_allr = ravel_pytree(pred_y_t_r_allr)
 
         pred_y_t_r_allr = ravel_batch_y_t_r_allr(pred_y_t_r_allr)
+        pred_y = pred_y_t_r_allr[:, :, :2]
         pred_y_t = pred_y_t_r_allr[:, :, :3]
         pred_y_t_r = pred_y_t_r_allr[:, :, :4]
 
@@ -302,15 +312,14 @@ def run(reg, lam):
         _, ravel_pred_y_t_r = ravel_pytree(pred_y_t_r)
         pred_y_t_r_allr = ravel_pred_y_t_r_allr(pred_y_t_r_allr)
 
-        # TODO: time in loss?
-        loss_grad = grad_loss_fun(ravel_batch_y_t_r(pred_y_t_r), batch_y)
+        total_loss_grad = grad_total_loss_fun(ravel_batch_y_t_r(pred_y_t_r), batch_y)
 
-        loss_grad_allr = np.concatenate((loss_grad,
+        loss_grad_allr = np.concatenate((total_loss_grad,
                                          np.zeros((parse_args.batch_time, parse_args.batch_size, NUM_REGS))),
                                         axis=2)
 
         # integrate adjoint ODE and count NFE
-        nfe = ode_vjp(ravel_pred_y_t(loss_grad[:, :, :-1]), pred_y_t, batch_t)[-1]
+        nfe = ode_vjp(ravel_pred_y_t(total_loss_grad[:, :, :-1]), pred_y_t, batch_t)[-1]
         params_grad = reg_ode_vjp(ravel_pred_y_t_r_allr(loss_grad_allr), pred_y_t_r_allr, batch_t)[:-1][3]
         print("backward NFE: %d" % nfe)
 
@@ -319,6 +328,34 @@ def run(reg, lam):
         if itr % parse_args.test_freq == 0:
             fargs = get_params(opt_state)
 
+            # get gradient wrt regularization
+            loss_grad = grad_loss_fun(ravel_batch_y(pred_y), batch_y)
+            reg_loss_grad = grad_reg_loss_fun(pred_y_t_r[:, :, -1])
+            manual_total_loss_grad = np.concatenate((loss_grad,
+                                                     np.zeros((parse_args.batch_time, parse_args.batch_size, 1)),
+                                                     lam * np.expand_dims(reg_loss_grad, axis=2)),
+                                                    axis=2)
+            assert np.allclose(manual_total_loss_grad, total_loss_grad)
+
+            manual_total_loss_grad_allr = np.concatenate((manual_total_loss_grad,
+                                                          np.zeros((parse_args.batch_time, parse_args.batch_size,
+                                                                    NUM_REGS))),
+                                                         axis=2)
+
+            cotangent_mask = np.zeros((parse_args.batch_time, parse_args.batch_size, 2 + 2 + NUM_REGS))
+
+            reg_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, 3], 1)
+            loss_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, [0, 1]], 1)
+
+            loss_grad = reg_ode_vjp(ravel_pred_y_t_r_allr(manual_total_loss_grad_allr * loss_cotangent_mask),
+                                    pred_y_t_r_allr, batch_t)[:-1][3]
+            reg_grad = reg_ode_vjp(ravel_pred_y_t_r_allr(manual_total_loss_grad_allr * reg_cotangent_mask),
+                                   pred_y_t_r_allr, batch_t)[:-1][3]
+
+            loss_grad_norm = np.sqrt(np.sum(loss_grad ** 2))
+            reg_grad_norm = np.sqrt(np.sum(reg_grad ** 2))
+
+            # calculate loss
             r = np.zeros((parse_args.batch_time, parse_args.data_size, 1))
             allr = np.zeros((parse_args.batch_time, parse_args.data_size, NUM_REGS))
             true_y_t_r_allr = np.concatenate((true_y,
@@ -347,17 +384,21 @@ def run(reg, lam):
 
             pred_y_t_r_allr = ravel_true_y_t_r_allr(pred_y_t_r_allr)
             pred_y = pred_y_t_r_allr[:, :, :2]
-            pred_y_r = pred_y_t_r_allr[:, :, [0, 1, 3]]
+            pred_y_t_r = pred_y_t_r_allr[:, :, :4]
 
             r0 = np.mean(pred_y_t_r_allr[1, :, -2])
             r1 = np.mean(pred_y_t_r_allr[1, :, -1])
 
             loss = loss_fun(pred_y, true_y)
-            total_loss = total_loss_fun(pred_y_r, true_y)
-            print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | r0 {:.6f} | r1 {:.6f}'.
-                  format(itr, total_loss, loss, r0, r1))
-            eprint('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | r0 {:.6f} | r1 {:.6f}'.
-                   format(itr, total_loss, loss, r0, r1))
+            total_loss = total_loss_fun(pred_y_t_r, true_y)
+            print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | '
+                  'Loss Grad Norm {:.6f} | Reg Grad Norm {:.6f} | r0 {:.6f} | r1 {:.6f}'.
+                  format(itr, total_loss, loss,
+                         loss_grad_norm, reg_grad_norm, r0, r1))
+            eprint('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | '
+                   'Loss Grad Norm {:.6f} | Reg Grad Norm {:.6f} | r0 {:.6f} | r1 {:.6f}'.
+                   format(itr, total_loss, loss,
+                          loss_grad_norm, reg_grad_norm, r0, r1))
             ii += 1
 
         if itr % parse_args.save_freq == 0:
@@ -388,7 +429,7 @@ if __name__ == "__main__":
 
         num_lam = 5
         hyperparams = {
-                       # "none": [0],
+                       "none": [0],
                        "r0": [100],
                        "r1": [100]
                        }
