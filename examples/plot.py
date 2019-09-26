@@ -170,111 +170,135 @@ comp_train_plot("all_r0", "r0")
 comp_train_plot("all_r1", "r1")
 
 
-# import jax.numpy as np
-#
-# DATA_SIZE = 1000
-# REGS = ['r0', 'r1']
-# NUM_REGS = len(REGS)
-#
-# true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, DATA_SIZE), axis=1), 2, axis=1)  # (N, D)
-# true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
-#                           np.expand_dims(true_y0[:, 1] ** 3, axis=1)),
-#                          axis=1)
-# true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
-#                         np.expand_dims(true_y1, axis=0)),
-#                         axis=0)  # (T, N, D)
-# t = np.linspace(0., 25., num=1000)  # (T)
-#
-# # set up input
-# r0 = np.zeros((DATA_SIZE, 1))
-# allr = np.zeros((DATA_SIZE, NUM_REGS))
-# true_y0_t_r0_allr = np.concatenate((true_y0,
-#                                     np.expand_dims(
-#                                         np.repeat(t[0], DATA_SIZE), axis=1),
-#                                     r0,
-#                                     allr), axis=1)
-# flat_true_y0_t_r0_allr, ravel_true_y0_t_r0_allr = ravel_pytree(true_y0_t_r0_allr)
-#
-# # set up MLP
-# init_random_params, predict = stax.serial(
-#     Dense(50), Tanh,
-#     Dense(2)
-# )
-#
-# _, init_params = init_random_params(key, (-1, 3))
-# _, ravel_params = ravel_pytree(init_params)
-#
-#
-# def test_reg_dynamics(y_r, t, *args):
-#     """
-#     Augmented dynamics to implement regularization. (on test)
-#     """
-#
-#     flat_params = args
-#     params = ravel_params(np.array(flat_params))
-#
-#     # separate out state from augmented
-#     y_r = ravel_true_y0_t_r0_allr(y_r)
-#     y_t = y_r[:, :3]
-#     y = y_t[:, :-1]
-#
-#     predictions_y = predict(params, y_t)
-#     predictions = np.concatenate((predictions_y,
-#                                   np.ones((DATA_SIZE, 1))),
-#                                  axis=1)
-#
-#     r0 = np.sum(y ** 2, axis=1) ** 0.5
-#     r1 = np.sum(predictions_y ** 2, axis=1) ** 0.5
-#     if reg == "r0":
-#         regularization = r0
-#     elif reg == "r1":
-#         regularization = r1
-#     else:
-#         regularization = np.zeros(DATA_SIZE)
-#
-#     pred_reg = np.concatenate((predictions,
-#                                np.expand_dims(regularization, axis=1),
-#                                np.expand_dims(r0, axis=1),
-#                                np.expand_dims(r1, axis=1)),
-#                               axis=1)
-#     flat_pred_reg, _ = ravel_pytree(pred_reg)
-#     return flat_pred_reg
-#
-#
-# for reg in plot_points:
-#     for lam in plot_points[reg]["lam"]:
-#         for itr in range(100, 1001, 100):
-#             # load params
-#             param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
-#             param_file = open(param_filename, "rb")
-#             params = pickle.load(param_file)
-#             fargs = params
-#
-#             pred_y_t_r_allr, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0_allr, t, atol=1e-8, rtol=1e-8)
-#
-#             pred_y0_t_r_allr, pred_y1_t_r_allr = pred_y_t_r_allr[0, :], pred_y_t_r_allr[1, :]
-#             pred_y0_t_r_allr = ravel_true_y0_t_r0_allr(pred_y0_t_r_allr)
-#             pred_y1_t_r_allr = ravel_true_y0_t_r0_allr(pred_y1_t_r_allr)
-#             pred_y = np.concatenate((np.expand_dims(pred_y0_t_r_allr[:, :2], axis=0),
-#                                      np.expand_dims(pred_y1_t_r_allr[:, :2], axis=0)),
-#                                     axis=0)
-#
-#             # plot each dim
-#             fig, ax = plt.subplots()
-#             # for i in range(pred_y_r.shape[1] - 1):
-#             #     pred_y = pre
-#             #     x, y = t, pred_y
-#             #     ax.plot(x, y, label=i)
-#
-#             x, y = t, pred_y_r[:, -1]
-#             ax.plot(x, y, label="reg")
-#             plt.legend()
-#             plt.title("Reg: %s" % reg)
-#             plt.xlabel("Time")
-#             plt.ylabel("state")
-#             figname = "%s/reg_%s_lam_%.4e_%d.png" % (dirname, reg, lam, itr)
-#             plt.savefig(figname)
-#             plt.clf()
-#             plt.close(fig)
-#
-#             param_file.close()
+import jax.numpy as np
+
+D = 2
+start_points = np.array([-1.5])
+DATA_SIZE = len(start_points)
+TIME_POINTS = 2
+TOTAL_TIME_POINTS = 1000
+REGS = ['r0', 'r1']
+NUM_REGS = len(REGS)
+
+true_y0 = np.repeat(np.expand_dims(start_points, axis=1), D, axis=1)  # (DATA_SIZE, D)
+true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
+                          np.expand_dims(true_y0[:, 1] ** 3, axis=1)),
+                         axis=1)
+true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
+                        np.expand_dims(true_y1, axis=0)),
+                        axis=0)  # (TIME_POINTS, DATA_SIZE, D)
+t = np.array([0., 25.])  # (TIME_POINTS, )
+total_t = np.linspace(0., 25., num=TOTAL_TIME_POINTS)  # (TOTAL_TIME_POINTS,  )
+
+r = np.zeros((TOTAL_TIME_POINTS, DATA_SIZE, 1))
+allr = np.zeros((TOTAL_TIME_POINTS, DATA_SIZE, NUM_REGS))
+true_y_t_r_allr = np.concatenate((np.repeat(np.expand_dims(true_y0, axis=0), TOTAL_TIME_POINTS, axis=0),
+                                  np.expand_dims(
+                                      np.tile(total_t, (DATA_SIZE, 1)).T,
+                                      axis=2),
+                                  r,
+                                  allr),
+                                 axis=2)
+
+# parse_args.batch_time * parse_args.data_size * (D + 2 + NUM_REGS) |->
+#                                       (parse_args.batch_time, parse_args.data_size, D + 2 + NUM_REGS)
+_, ravel_true_y_t_r_allr = ravel_pytree(true_y_t_r_allr)
+
+# set up input
+r0 = np.zeros((DATA_SIZE, 1))
+allr = np.zeros((DATA_SIZE, NUM_REGS))
+true_y0_t_r0_allr = np.concatenate((true_y0,
+                                    np.expand_dims(
+                                        np.repeat(total_t[0], DATA_SIZE), axis=1),
+                                    r0,
+                                    allr), axis=1)
+
+# parse_args.data_size * (D + 2 + NUM_REGS) |-> (parse_args.data_size, D + 2 + NUM_REGS)
+flat_true_y0_t_r0_allr, ravel_true_y0_t_r0_allr = ravel_pytree(true_y0_t_r0_allr)
+
+# set up MLP
+init_random_params, predict = stax.serial(
+    Dense(50), Tanh,
+    Dense(D)
+)
+
+_, init_params = init_random_params(key, (-1, D + 1))
+_, ravel_params = ravel_pytree(init_params)
+
+
+def test_reg_dynamics(y_t_r_allr, t, *args):
+    """
+    Augmented dynamics to implement regularization. (on test)
+    """
+
+    flat_params = args
+    params = ravel_params(np.array(flat_params))
+
+    # separate out state from augmented
+    y_t_r_allr = ravel_true_y0_t_r0_allr(y_t_r_allr)
+    y_t = y_t_r_allr[:, :D + 1]
+    y = y_t[:, :-1]
+
+    predictions_y = predict(params, y_t)
+    predictions = np.concatenate((predictions_y,
+                                  np.ones((DATA_SIZE, 1))),
+                                 axis=1)
+
+    r0 = np.sum(y ** 2, axis=1) ** 0.5
+    r1 = np.sum(predictions_y ** 2, axis=1) ** 0.5
+    if reg == "r0":
+        regularization = r0
+    elif reg == "r1":
+        regularization = r1
+    else:
+        regularization = np.zeros(DATA_SIZE)
+
+    pred_reg = np.concatenate((predictions,
+                               np.expand_dims(regularization, axis=1),
+                               np.expand_dims(r0, axis=1),
+                               np.expand_dims(r1, axis=1)),
+                              axis=1)
+    flat_pred_reg, _ = ravel_pytree(pred_reg)
+    return flat_pred_reg
+
+
+for reg in plot_points:
+    for lam in plot_points[reg]["lam"]:
+        for itr in range(100, 1001, 100):
+            # load params
+            param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
+            param_file = open(param_filename, "rb")
+            params = pickle.load(param_file)
+            fargs = params
+
+            pred_y_t_r_allr, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0_allr, total_t, atol=1e-8, rtol=1e-8)
+
+            pred_y_t_r_allr = ravel_true_y_t_r_allr(pred_y_t_r_allr)
+            pred_y = pred_y_t_r_allr[:, :, :D]
+            pred_y_t_r = pred_y_t_r_allr[:, :, :D + 2]
+
+            for data_point in range(pred_y.shape[1]):
+                # plot each dim
+                fig, ax = plt.subplots()
+                for i in range(pred_y.shape[2]):
+                    x, y = total_t, pred_y[:, data_point, i]
+                    ax.plot(x, y, label=i)
+
+                # plot r0
+                x, y = total_t, np.sum(pred_y_t_r[:, data_point, :D] ** 2, axis=1) ** 0.5
+                ax.plot(x, y, label="r0")
+
+                # plot r0
+                x, y = total_t, np.sum(predict(ravel_params(fargs), pred_y_t_r[:, data_point, :D + 1]) ** 2, axis=1) ** 0.5
+                ax.plot(x, y, label="r1")
+
+                plt.legend()
+                plt.title("Reg: %s" % reg)
+                plt.xlabel("Time")
+                plt.ylabel("state")
+                figname = "%s/reg_%s_lam_%.4e_%d.png" % (dirname, reg, lam, itr)
+                plt.savefig(figname)
+                plt.clf()
+                plt.close(fig)
+
+            param_file.close()
