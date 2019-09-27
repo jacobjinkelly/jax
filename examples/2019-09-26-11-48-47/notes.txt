@@ -1,0 +1,1 @@
+Sanity check to make sure what we're regularizing is actually being minimized. (this time setting the weight really high, and after fixing a bunch of small bugs).
