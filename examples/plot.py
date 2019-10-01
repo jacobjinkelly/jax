@@ -16,7 +16,7 @@ config.update('jax_enable_x64', True)
 
 key = random.PRNGKey(0)
 
-dirname = "2019-09-26-11-48-47"
+dirname = "2019-09-30-18-06-25"
 results_path = "%s/results.txt" % dirname
 
 file = open(results_path, "r")
@@ -212,7 +212,7 @@ def comp_grad_norm_plot(yaxis_vals, yaxis_name):
             plt.title(str(reg) + " " + str(lam))
             plt.xlabel("Training")
             plt.ylabel(yaxis_name)
-            plt.savefig("%s/comp_grad_norm_%s.png" % (dirname, str(reg) + " " + str(lam)))
+            plt.savefig("%s/comp_grad_norm_%s.png" % (dirname, str(reg) + "_" + str(lam)))
             plt.clf()
             plt.close(fig)
 
@@ -366,6 +366,9 @@ for reg in plot_points:
                     ax.plot(x, y, label=fn_name)
                     xy = (x[-1], y[-1])
                     ax.annotate('(%s, %s)' % xy, xy=xy, textcoords='data')
+
+                xy = (total_t[0], pred_y[:, 0, 0][0])
+                ax.annotate('(%s, %s)' % xy, xy=xy, textcoords='data')
 
                 # plot r0
                 x, y = total_t, np.sum(pred_y_t_r[:, data_point, :D] ** 2, axis=1) ** 0.5
