@@ -9,5 +9,12 @@ results=$(pwd)/$curr_time
 mkdir -p $scripts
 mkdir -p $results
 
-./submit.sh $scripts $results r0 1.596
-./submit.sh $scripts $results r1 76.880
+lam_file="lams.txt"
+
+while IFS= read -r line
+do
+    ./submit.sh $scripts $results r0 $line
+    ./submit.sh $scripts $results r1 $line
+done < "$lam_file"
+
+./submit.sh $scripts $results none 0

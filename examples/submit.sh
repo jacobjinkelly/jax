@@ -5,7 +5,7 @@ results=$2
 reg=$3
 lam=$4
 
-command="sbatch -p cpu --mem=4G"
+command="sbatch -p cpu --mem=8G"
 
 # create shell script for job
 params="reg_${reg}_lam_${lam}"
