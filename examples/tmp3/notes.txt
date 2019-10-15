@@ -1,0 +1,1 @@
+Change the time interval to be short (1 instead of 25).
