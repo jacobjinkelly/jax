@@ -424,7 +424,6 @@ def test_grad_loss_odeint():
         dim = len(flat_x)
         g = onp.zeros_like(flat_x)
         for i in range(dim):
-            print(i, dim)
             d = onp.zeros_like(flat_x)
             d[i] = eps
             g[i] = (f(unravel(flat_x + d)) - f(unravel(flat_x - d))) / (2.0 * eps)
@@ -446,17 +445,18 @@ def test_grad_loss_odeint():
         grad_val = grad_loss_fun(ys)
         return np.sum(ys * grad_val)
 
+    dim = 3
+
     rng = random.PRNGKey(0)
     init_random_params, predict = stax.serial(
         Dense(4), Relu,
         Dense(4), Relu,
-        Dense(2), LogSoftmax
+        Dense(dim), LogSoftmax
     )
 
-    output_shape, init_params = init_random_params(rng, (-1, 2))
-    assert output_shape == (-1, 2)
+    output_shape, init_params = init_random_params(rng, (-1, dim))
+    assert output_shape == (-1, dim)
 
-    dim = 2
     t0 = 0.1
     t1 = 0.2
     y0 = np.linspace(0.1, 0.9, dim)
@@ -477,10 +477,19 @@ def test_grad_loss_odeint():
     ys, _ = odeint(f, fargs, y0, np.array([t0, t1]), atol=1e-8, rtol=1e-8)
     ode_vjp = grad_odeint(f, fargs)
     grad_val = grad_loss_fun(ys)
-    exact_grad, _ = ravel_pytree(ode_vjp(grad_val, ys, np.array([t0, t1]))[:-1])
+    exact_grad, ravel_grad = ravel_pytree(ode_vjp(grad_val, ys, np.array([t0, t1]))[:-1])
 
-    # TODO: y0 grads are incorrect, everything else is good
-    assert np.allclose(numerical_grad, exact_grad, atol=1e-1)
+    exact_grad = ravel_grad(exact_grad)
+    numerical_grad = ravel_grad(numerical_grad)
+
+    # wrt y0
+    assert np.allclose(exact_grad[1], numerical_grad[1], atol=1e-1)
+
+    # wrt [t0, t1]
+    assert np.allclose(exact_grad[2], numerical_grad[2], atol=1e-5)
+
+    # wrt params
+    assert np.allclose(exact_grad[3], numerical_grad[3], atol=1e-5)
 
 
 def plot_gradient_field(ax, func, xlimits, ylimits, numticks=30):
