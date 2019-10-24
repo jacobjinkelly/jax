@@ -1,3 +1,4 @@
+# coding=utf-8
 # Copyright 2019 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +20,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import itertools
 import operator
 import threading
@@ -31,7 +33,7 @@ from jax import core
 from jax.lax import lax
 from jax import linear_util as lu
 from jax.abstract_arrays import ShapedArray, raise_to_shaped
-from jax.api_util import flatten_fun_nokwargs
+from jax.api_util import flatten_fun_nokwargs, apply_flat_fun_nokwargs
 from jax.interpreters import ad
 from jax.interpreters import partial_eval as pe
 from jax.interpreters import xla
@@ -42,7 +44,7 @@ from jax.lib import xla_client
 from jax.util import (partial, unzip2, safe_map, safe_zip, split_list,
                       split_dict, cache)
 from jax.tree_util import (tree_flatten, tree_unflatten, treedef_is_leaf,
-                           treedef_children)
+                           treedef_children, tree_map)
 from jax import ad_util
 
 _map = safe_map
@@ -79,6 +81,17 @@ class FixedPointError(Exception): pass
 
 ### fori_loop and while_loop
 
+def _fori_cond_fun(loop_carry):
+  i, upper, _ = loop_carry
+  return lax.lt(i, upper)
+
+@cache()
+def _fori_body_fun(body_fun):
+  def while_body_fun(loop_carry):
+    i, upper, x = loop_carry
+    return lax.add(i, lax._const(i, 1)), upper, body_fun(i, x)
+  return while_body_fun
+
 def fori_loop(lower, upper, body_fun, init_val):
   """Loop from ``lower`` to ``upper`` by reduction to ``while_loop``.
 
@@ -108,15 +121,8 @@ def fori_loop(lower, upper, body_fun, init_val):
   Returns:
     Loop value from the final iteration, of type ``a``.
   """
-  def while_cond_fun(loop_carry):
-    i, _ = loop_carry
-    return lax.lt(i, upper)
-
-  def while_body_fun(loop_carry):
-    i, x = loop_carry
-    return lax.add(i, lax._const(i, 1)), body_fun(i, x)
-
-  _, result = while_loop(while_cond_fun, while_body_fun, (lower, init_val))
+  _, _, result = while_loop(_fori_cond_fun, _fori_body_fun(body_fun),
+                            (lower, upper, init_val))
   return result
 
 
@@ -277,6 +283,30 @@ batching.primitive_batchers[while_p] = _while_loop_batching_rule
 ### cond
 
 def cond(pred, true_operand, true_fun, false_operand, false_fun):
+  """Conditionally apply ``true_fun`` or ``false_fun``.
+
+  Has equivalent semantics to this Python implementation::
+
+    def cond(pred, true_operand, true_fun, false_operand, false_fun):
+      if pred:
+        return true_fun(true_operand)
+      else:
+        return false_fun(false_operand)
+
+  Pred has to be a scalar type, collection types (list, tuple) are not supported
+
+  """
+
+  if len(onp.shape(pred)) != 0:
+    raise TypeError("Pred must be a scalar, got {} of shape {}".format(pred, onp.shape(pred)))
+
+  pred_dtype = onp.result_type(pred)
+  if pred_dtype.kind != 'b':
+    if pred_dtype.kind in 'iuf':
+      pred = pred != 0
+    else:
+      msg = ("Pred type must be either boolean or number, got {}")
+      raise TypeError(msg.format(pred_dtype))
   true_ops, true_tree = tree_flatten((true_operand,))
   true_avals = tuple(_map(_abstractify, true_ops))
   true_jaxpr, true_consts, out_tree = _initial_style_jaxpr(true_fun, true_tree, true_avals)
@@ -440,8 +470,9 @@ def scan(f, init, xs):
     raise ValueError(msg.format([x.shape[0] for x in xs_flat]))
 
   carry_avals = tuple(_map(_abstractify, init_flat))
-  xs_avals = _map(_abstractify, xs_flat)
-  x_avals = tuple(ShapedArray(aval.shape[1:], aval.dtype) for aval in xs_avals)
+  x_shapes = [masking.padded_shape_as_value(x.shape[1:]) for x in xs_flat]
+  x_dtypes = [x.dtype for x in xs_flat]
+  x_avals = tuple(_map(ShapedArray, x_shapes, x_dtypes))
   jaxpr, consts, out_tree = _initial_style_jaxpr(f, in_tree, carry_avals + x_avals)
   carry_avals_out, y_avals = split_list(jaxpr.out_avals, [num_carry])
   if tuple(carry_avals_out) != carry_avals:
@@ -698,10 +729,6 @@ def _scan_batching_rule(args, dims, forward, length, jaxpr, num_consts,
 def _scan_polymorphic_shape_rule(shape_exprs, forward, length, jaxpr,
                                  num_consts, num_carry, linear):
   const_shexprs, init_shexprs, xs_shexprs = split_list(shape_exprs, [num_consts, num_carry])
-  if (any(any(type(d) is Id for d in shexpr) for shexpr in const_shexprs)
-      or any(any(type(d) is Id for d in shexpr) for shexpr in init_shexprs)
-      or any(any(type(d) is Id for d in shexpr[1:]) for shexpr in xs_shexprs)):
-    raise NotImplementedError
   _, y_avals = split_list(jaxpr.out_avals, [num_carry])
   ys_shapes = [ShapeExpr(length, *y_aval.shape) for y_aval in y_avals]
   return init_shexprs + ys_shapes
@@ -750,7 +777,7 @@ def scan_bind(*args, **kwargs):
   xs_avals = _map(partial(_promote_aval_rank, length), x_avals)
   assert all(_map(typecheck, consts_avals, consts))
   assert all(_map(typecheck, init_avals, init))
-  assert all(_map(typecheck, xs_avals, xs))
+  # assert all(_map(typecheck, xs_avals, xs))
   # check that output carry type matches input carry type
   carry_avals, _ = split_list(jaxpr.out_avals, [num_carry])
   assert all(_map(typematch, init_avals, carry_avals))
@@ -822,3 +849,336 @@ def _memcpy(axis, num, src, dst, offset):
   return fori_loop(0, num, body, dst)
 
 masking.masking_rules[lax.concatenate_p] = _concat_masking_rule
+
+
+def _flatten_higher_order_func(
+    f, tree, func_name, input_name,
+):
+  """Flatten a higher order function ``f`` of the form ``f(g, x)``.
+
+  ``f`` must have the type signature:
+
+  .. code-block:: haskell
+
+    f :: (a -> a) -> a -> a
+
+  ```a`` many be any arbitrary fixed pytree structure. The returned function has
+  the same structure as ``f``, except every appearence of ``a`` is replaced by a
+  flat sequence of arrays in the style used internally by JAX primitives
+  (variadic ``*args`` arguments in function calls, lists in return values).
+  """
+  def flat_fun(flat_g, *args_flat):
+    args = tree_unflatten(tree, args_flat)
+    g = partial(apply_flat_fun_nokwargs, flat_g, (tree, tree))
+    out = f(g, args)
+    out_flat, out_tree = tree_flatten(out)
+    _check_tree(func_name, input_name, out_tree, tree)
+    return out_flat
+  return flat_fun
+
+
+def _check_tree(func_name, expected_name, actual_tree, expected_tree):
+  if actual_tree != expected_tree:
+    raise TypeError(
+        "{}() output pytree structure must match {}, got {} and {}."
+        .format(func_name, expected_name, actual_tree, expected_tree))
+
+
+
+def root(f, initial_guess, solve, tangent_solve):
+  """Differentiably solve for a roots of a function.
+
+  This is a low-level routine, mostly intended for internal use in JAX.
+  Gradients of root() are defined with respect to closed-over variables from
+  the provided function f.
+
+  Args:
+    f: function for which to find a root. Should accept a single argument,
+      return a tree of arrays with the same structure as its input.
+    initial_guess: initial guess for a zero of f.
+    solve: function to solve for the roots of f. Should take two positional
+      arguments, f and initial_guess, and return a solution with the same
+      structure as initial_guess such that func(solution) = 0. In other words,
+      the following is assumed to be true (but not checked)::
+
+        solution = solve(f, initial_guess)
+        error = f(solution)
+        assert all(error == 0)
+
+    tangent_solve: function to solve the tangent system. Should take two
+      positional arguments, a linear function ``g`` (the function ``f``
+      linearized at its root) and a tree of array(s) ``y`` with the same
+      structure as initial_guess, and return a solution ``x`` such that
+      ``g(x)=y``:
+
+      - For scalar ``y``, use ``lambda g, y: y / g(1.0)``.
+      - For vector ``y``, you could use a linear solve with the Jacobian, if
+        dimensionality of ``y`` is not too large:
+        ``lambda g, y: np.linalg.solve(jacobian(g)(y), y)``.
+
+  Returns:
+    The result of calling solve(f, initial_guess) with gradients defined via
+    implicit differentiation assuming ``f(solve(f, initial_guess)) == 0``.
+  """
+  guess_flat, in_args_tree = tree_flatten((initial_guess,))
+  guess_avals = tuple(_map(_abstractify, guess_flat))
+  jaxpr, consts, out_tree = _initial_style_jaxpr(f, in_args_tree, guess_avals)
+
+  in_tree, = treedef_children(in_args_tree)
+  _check_tree("f", "initial_guess", out_tree, in_tree)
+
+  solve_flat = _flatten_higher_order_func(
+      solve, in_tree, "solve", "initial_guess")
+  tangent_solve_flat = _flatten_higher_order_func(
+      tangent_solve, in_tree, "tangent_solve", "initial_guess")
+
+  out_flat = root_p.bind(*itertools.chain(consts, guess_flat),
+                         num_consts=len(consts), jaxpr=jaxpr, solve=solve_flat,
+                         tangent_solve=tangent_solve_flat)
+  return tree_unflatten(out_tree, out_flat)
+
+
+def _root_abstract_eval(*args, **kwargs):
+  return args[kwargs['num_consts']:]
+
+
+def _root_impl(*args, **kwargs):
+  num_consts, jaxpr, solve, _ = split_dict(
+      kwargs, ['num_consts', 'jaxpr', 'solve', 'tangent_solve'])
+  params, initial_guess = split_list(args, [num_consts])
+  f = partial(core.jaxpr_as_fun(jaxpr), *params)
+  return solve(f, *initial_guess)
+
+
+def _root_jvp(primals, tangents, num_consts, jaxpr, solve, tangent_solve):
+  params = primals[:num_consts]
+  solution = tuple(root_p.bind(*primals, num_consts=num_consts, jaxpr=jaxpr,
+                               solve=solve, tangent_solve=tangent_solve))
+  params_dot = tangents[:num_consts]
+
+  # F(m, u) = 0      # system of equations in u, parameterized by m
+  #                  # solution is u*(m) defined in a neighborhood
+  # F(m, u*(m)) = 0  # satisfied in a neighborhood
+  #
+  # ∂_0 F(m, u*(m)) + ∂_1 F(m, u*(m)) ∂ u*(m) = 0       # implied by line above
+  # ∂ u*(m) = - (∂_1 F(m, u*(m)))^{-1} ∂_0 F(m, u*(m))  # rearrange
+  #
+  # ∂ u*(m)[v] = - (∂_1 F(m, u*(m)))^{-1} [∂_0 F(m, u*(m))[v]]  # jvp
+
+  f = core.jaxpr_as_fun(jaxpr)
+  f_fixed_params = lambda *solution: f(*(params + solution))
+  f_fixed_solution = lambda *params: f(*(params + solution))
+
+  _, rhs = ad.jvp(lu.wrap_init(f_fixed_solution)).call_wrapped(params, params_dot)
+  _, f_jvp_wrt_solution = api.linearize(f_fixed_params, *solution)
+  solution_dot = [-x for x in tangent_solve(f_jvp_wrt_solution, *rhs)]
+
+  return solution, solution_dot
+
+
+root_p = core.Primitive('root')
+root_p.multiple_results = True
+root_p.def_impl(_root_impl)
+root_p.def_abstract_eval(_root_abstract_eval)
+ad.primitive_jvps[root_p] = _root_jvp
+xla.initial_style_translations[root_p] = xla.lower_fun(_root_impl, initial_style=True)
+# TODO(shoyer): write batching rule
+
+
+class _LinearSolveTuple(collections.namedtuple(
+    '_LinearSolveTuple', 'matvec, vecmat, solve, transpose_solve')):
+
+  def transpose(self):
+    return type(self)(self.vecmat, self.matvec, self.transpose_solve, self.solve)
+
+
+def _split_linear_solve_args(args, const_lengths):
+  params_list = split_list(args, list(const_lengths))
+  return _LinearSolveTuple(*params_list[:-1]), params_list[-1]
+
+
+def _transpose_function(linear_fun, primals):
+  """Transpose a linear function."""
+  # TODO(shoyer): can we use something more direct than the vjp machinery?
+  # It's particularly awkward that we need the second argument to give
+  # particular values of the primals, which are entirely arbitrary.
+  _, vjp_fun = api.vjp(linear_fun, primals)
+
+  def transposed_fun(x):
+    (y,) = vjp_fun(x)
+    return y
+
+  return transposed_fun
+
+
+def _flatten(args):
+  return [x for arg in args for x in arg]
+
+
+def _check_shapes(func_name, expected_name, actual, expected, tree):
+  actual_shapes = _map(onp.shape, actual)
+  expected_shapes = _map(onp.shape, expected)
+  if actual_shapes != expected_shapes:
+    actual_shape_tree = tree_unflatten(tree, actual_shapes)
+    act_shape_tree = tree_unflatten(tree, actual_shapes)
+    raise ValueError('{}() output shapes must match {}, got {} and {}'
+                     .format(func_name, expected_name,
+                             tree_unflatten(tree, actual_shapes),
+                             tree_unflatten(tree, expected_shapes)))
+
+
+def custom_linear_solve(
+    matvec, b, solve, transpose_solve=None, symmetric=False):
+  """Perform a matrix-free linear solve with implicitly defined gradients.
+
+  This function allows for overriding or defining gradients for a linear
+  solve directly via implicit differentiation at the solution, rather than by
+  differenting *through* the solve operation. This can sometimes be much faster
+  or more numerically stable, or differentiating through the solve operation
+  may not even be implemented (e.g., if ``solve`` using ``lax.while_loop``).
+
+  Required invariant:
+      x = solve(matvec, b)  # solve the linear equation
+      assert matvec(x) == b  # not checked
+
+  Args:
+    matvec: linear function to invert. Must be differentiable.
+    b: constant right handle side of the equation. May be any nested structure
+      of arrays.
+    solve: higher level function that solves for solution to the linear
+      equation, i.e., ``matvec(solve(matvec, x)) == x`` for all ``x`` of the
+      same form as ``b``. This function need not be differenatiable.
+    transpose_solve: higher level function for solving the transpose linear
+      equation, i.e., ``vecmat(transpose_solve(vecmat, x)) == x``, where
+      ``vecmat`` is the transpose of the linear map ``matvec`` (computed
+      automatically with autodiff). Required for backwards mode automatic
+      differentiation, unless ``symmetric=True``, in which case ``solve``
+      provides the default value.
+    symmetric: bool indicating if it is safe to assume the linear map
+      corresponds to a symmetric matrix, i.e., ``matvec == vecmat``.
+
+  Returns:
+    Result of ``solve(matvec, b)``, with gradients defined assuming that the
+    solution ``x`` satisfies the linear equation ``matvec(x) == b``.
+  """
+  if transpose_solve is None and symmetric:
+    transpose_solve = solve
+
+  b_flat, in_args_tree = tree_flatten((b,))
+  b_avals = tuple(_map(_abstractify, b_flat))
+  matvec_jaxpr, matvec_consts, out_tree = _initial_style_jaxpr(
+      matvec, in_args_tree, b_avals)
+
+  tree, = treedef_children(in_args_tree)
+  _check_tree("matvec", "b", out_tree, tree)
+
+  solve_jaxpr, solve_consts, out_tree = _initial_style_jaxpr(
+      partial(solve, matvec), in_args_tree, b_avals)
+  _check_tree("solve", "b", out_tree, tree)
+
+  if transpose_solve is None:
+    vecmat_jaxpr = tr_solve_jaxpr = None
+    vecmat_consts = tr_solve_consts = []
+  else:
+    if symmetric:
+      vecmat = matvec
+      vecmat_jaxpr = matvec_jaxpr
+      vecmat_consts = matvec_consts
+    else:
+      vecmat = _transpose_function(matvec, b)
+      vecmat_jaxpr, vecmat_consts, out_tree = _initial_style_jaxpr(
+          vecmat, in_args_tree, b_avals)
+      assert out_tree == tree
+
+    tr_solve_jaxpr, tr_solve_consts, out_tree = _initial_style_jaxpr(
+        partial(transpose_solve, vecmat), in_args_tree, b_avals)
+    _check_tree("transpose_solve", "b", out_tree, tree)
+
+  all_consts = [matvec_consts, vecmat_consts, solve_consts, tr_solve_consts]
+  const_lengths = _LinearSolveTuple(*_map(len, all_consts))
+  jaxprs = _LinearSolveTuple(
+      matvec_jaxpr, vecmat_jaxpr, solve_jaxpr, tr_solve_jaxpr)
+
+  out_flat = custom_linear_solve_p.bind(
+      *(_flatten(all_consts) + b_flat),
+      const_lengths=const_lengths, jaxprs=jaxprs, tree=tree)
+  return tree_unflatten(tree, out_flat)
+
+
+def _custom_linear_solve_abstract_eval(*args, **kwargs):
+  return args[sum(kwargs['const_lengths']):]
+
+
+def _custom_linear_solve_impl(*args, **kwargs):
+  const_lengths, jaxprs, tree = split_dict(
+      kwargs, ['const_lengths', 'jaxprs', 'tree'])
+  params, b = _split_linear_solve_args(args, const_lengths)
+  x = core.jaxpr_as_fun(jaxprs.solve)(*(params.solve + b))
+  _check_shapes('solve', 'b', x, b, tree)
+  return x
+
+
+def _tangent_linear_map(func, params, params_dot, *x):
+  """Compute the tangent of a linear map.
+
+  Assuming ``func(*params, *x)`` is linear in ``x`` and computes ``A @ x``,
+  this function computes ``∂A @ x``.
+  """
+  assert any(p is not ad_util.zero for p in params_dot)
+  zeros = [ad_util.zero] * len(x)
+  _, out_tangent = ad.jvp(lu.wrap_init(func)).call_wrapped(
+      params + list(x), params_dot + zeros)
+  return out_tangent
+
+
+def _custom_linear_solve_jvp(primals, tangents, const_lengths, jaxprs, tree):
+  # A x - b = 0
+  # ∂A x + A ∂x - ∂b = 0
+  # ∂x = A^{-1} (∂b - ∂A x)
+
+  kwargs = dict(const_lengths=const_lengths, jaxprs=jaxprs, tree=tree)
+  x = custom_linear_solve_p.bind(*primals, **kwargs)
+
+  params, _ = _split_linear_solve_args(primals, const_lengths)
+  params_dot, b_dot = _split_linear_solve_args(tangents, const_lengths)
+
+  if all(p is ad_util.zero for p in params_dot.matvec):
+    # no need to evaluate matvec_tangents
+    rhs = b_dot
+  else:
+    matvec_tangents = _tangent_linear_map(
+        core.jaxpr_as_fun(jaxprs.matvec), params.matvec, params_dot.matvec, *x)
+    _check_shapes("matvec", "b", matvec_tangents, x, tree)
+    rhs = _map(ad.add_tangents, b_dot, _map(operator.neg, matvec_tangents))
+
+  x_dot = custom_linear_solve_p.bind(*(_flatten(params) + rhs), **kwargs)
+
+  return x, x_dot
+
+
+def _custom_linear_solve_transpose_rule(cotangent, *primals, **kwargs):
+  const_lengths, jaxprs, tree = split_dict(
+      kwargs, ['const_lengths', 'jaxprs', 'tree'])
+
+  if jaxprs.transpose_solve is None:
+    raise TypeError('transpose_solve required for backwards mode automatic '
+                    'differentiation of custom_linear_solve')
+
+  params, b = _split_linear_solve_args(primals, const_lengths)
+  assert b == [ad.undefined_primal] * len(b)
+  cotangent_b = custom_linear_solve_p.bind(
+      *(_flatten(params.transpose()) + cotangent),
+      const_lengths=const_lengths.transpose(), jaxprs=jaxprs.transpose(),
+      tree=tree)
+  return [None] * sum(const_lengths) + cotangent_b
+
+
+custom_linear_solve_p = core.Primitive('custom_linear_solve')
+custom_linear_solve_p.multiple_results = True
+custom_linear_solve_p.def_impl(_custom_linear_solve_impl)
+custom_linear_solve_p.def_abstract_eval(_custom_linear_solve_abstract_eval)
+ad.primitive_jvps[custom_linear_solve_p] = _custom_linear_solve_jvp
+xla.initial_style_translations[custom_linear_solve_p] = xla.lower_fun(
+    _custom_linear_solve_impl, initial_style=True)
+ad.primitive_transposes[custom_linear_solve_p] = _custom_linear_solve_transpose_rule
+# TODO(shoyer): write batching rule

@@ -1,3 +1,4 @@
+# coding=utf-8
 # Copyright 2018 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,6 +36,7 @@ from jax.core import Primitive
 from jax.lax import (standard_primitive, standard_unop, binop_dtype_rule,
                      _float, _complex, _input_dtype, _broadcasting_select)
 from jax.lib import xla_bridge as xb
+from jax.lib import xla_client
 from jax.lib import lapack
 from jax.lib import cusolver
 
@@ -100,9 +102,6 @@ def cholesky_jvp_rule(primals, tangents):
   x, = primals
   sigma_dot, = tangents
   L = np.tril(cholesky_p.bind(x))
-
-  if sigma_dot is ad_util.zero:
-    return L, ad_util.zero
 
   # Forward-mode rule from https://arxiv.org/pdf/1602.07527.pdf
   def phi(X):
@@ -211,8 +210,14 @@ def eigh_impl(operand, lower):
   return v, w
 
 def eigh_translation_rule(c, operand, lower):
-  raise NotImplementedError(
-    "Symmetric eigendecomposition is only implemented on the CPU backend")
+  shape = c.GetShape(operand)
+  dims = shape.dimensions()
+  if dims[-1] == 0:
+    return c.Tuple(operand, c.Reshape(operand, None, dims[:-1]))
+  if not lower:
+    n = len(dims)
+    operand = c.Transpose(operand, list(range(n - 2)) + [n - 1, n - 2])
+  return c.Eigh(operand)
 
 def eigh_abstract_eval(operand, lower):
   if isinstance(operand, ShapedArray):
@@ -254,19 +259,16 @@ def eigh_jvp_rule(primals, tangents, lower):
 
   v, w = eigh_p.bind(symmetrize(a), lower=lower)
 
-  if a_dot is ad_util.zero:
-    return core.pack((v, w)), ad.TangentTuple(ad_util.zero, ad_util.zero)
-
   # for complex numbers we need eigenvalues to be full dtype of v, a:
   w = w.astype(a.dtype)
   eye_n = np.eye(a.shape[-1], dtype=a.dtype)
   # carefully build reciprocal delta-eigenvalue matrix, avoiding NaNs.
-  Fmat = np.reciprocal(eye_n + w - w[..., np.newaxis]) - eye_n
+  Fmat = np.reciprocal(eye_n + w[..., np.newaxis, :] - w[..., np.newaxis]) - eye_n
   # eigh impl doesn't support batch dims, but future-proof the grad.
   dot = lax.dot if a.ndim == 2 else lax.batch_matmul
   vdag_adot_v = dot(dot(_H(v), a_dot), v)
   dv = dot(v, np.multiply(Fmat, vdag_adot_v))
-  dw = np.diagonal(vdag_adot_v)
+  dw = np.diagonal(vdag_adot_v, axis1=-2, axis2=-1)
   return (v, w), (dv, dw)
 
 def eigh_batching_rule(batched_args, batch_dims, lower):
@@ -281,6 +283,7 @@ eigh_p.def_impl(eigh_impl)
 eigh_p.def_abstract_eval(eigh_abstract_eval)
 xla.translations[eigh_p] = eigh_translation_rule
 ad.primitive_jvps[eigh_p] = eigh_jvp_rule
+batching.primitive_batchers[eigh_p] = eigh_batching_rule
 
 _cpu_syevd = lapack.syevd
 
@@ -289,7 +292,7 @@ xla.backend_specific_translations['cpu'][eigh_p] = partial(
 
 xla.backend_specific_translations['gpu'][eigh_p] = partial(
   _eigh_cpu_gpu_translation_rule, cusolver.syevd)
-batching.primitive_batchers[eigh_p] = eigh_batching_rule
+
 
 
 
@@ -317,20 +320,33 @@ def triangular_solve_shape_rule(a, b, left_side=False, **unused_kwargs):
 
 def triangular_solve_jvp_rule_a(
     g_a, ans, a, b, left_side, lower, transpose_a, conjugate_a, unit_diagonal):
-  if g_a is ad_util.zero:
-    return ad_util.zero
+  m, n = b.shape[-2:]
   k = 1 if unit_diagonal else 0
   g_a = np.tril(g_a, k=-k) if lower else np.triu(g_a, k=k)
   g_a = lax.neg(g_a)
   g_a = np.swapaxes(g_a, -1, -2) if transpose_a else g_a
   g_a = np.conj(g_a) if conjugate_a else g_a
-  tmp = triangular_solve(a, g_a, left_side, lower, transpose_a, conjugate_a,
-                         unit_diagonal)
   dot = lax.dot if g_a.ndim == 2 else lax.batch_matmul
+
+  def a_inverse(rhs):
+    return triangular_solve(a, rhs, left_side, lower, transpose_a, conjugate_a,
+                            unit_diagonal)
+
+  # triangular_solve is about the same cost as matrix multplication (~n^2 FLOPs
+  # for matrix/vector inputs). Order these operations in whichever order is
+  # cheaper.
   if left_side:
-    return dot(tmp, ans)
+    assert g_a.shape[-2:] == a.shape[-2:] == (m, m) and ans.shape[-2:] == (m, n)
+    if m > n:
+      return a_inverse(dot(g_a, ans))  # A^{-1} (∂A X)
+    else:
+      return dot(a_inverse(g_a), ans)  # (A^{-1} ∂A) X
   else:
-    return dot(ans, tmp)
+    assert g_a.shape[-2:] == a.shape[-2:] == (n, n) and ans.shape[-2:] == (m, n)
+    if m < n:
+      return a_inverse(dot(ans, g_a))  # (X ∂A) A^{-1}
+    else:
+      return dot(ans, a_inverse(g_a))  # X (∂A A^{-1})
 
 def triangular_solve_transpose_rule(
     cotangent, a, b, left_side, lower, transpose_a, conjugate_a,
@@ -338,8 +354,11 @@ def triangular_solve_transpose_rule(
   # Triangular solve is nonlinear in its first argument and linear in its second
   # argument, analogous to `div` but swapped.
   assert a is not ad.undefined_primal and b is ad.undefined_primal
-  cotangent_b = triangular_solve(a, cotangent, left_side, lower,
-                                 not transpose_a, conjugate_a, unit_diagonal)
+  if cotangent is ad_util.zero:
+    cotangent_b = ad_util.zero
+  else:
+    cotangent_b = triangular_solve(a, cotangent, left_side, lower,
+                                   not transpose_a, conjugate_a, unit_diagonal)
   return [None, cotangent_b]
 
 
@@ -418,7 +437,7 @@ def _lu_unblocked(a):
   """Unblocked LU decomposition, as a rolled loop."""
   m, n = a.shape
   def body(k, state):
-    pivot, perm, a, error = state
+    pivot, perm, a = state
     m_idx = np.arange(m)
     n_idx = np.arange(n)
 
@@ -436,23 +455,21 @@ def _lu_unblocked(a):
 
     # a[k+1:, k] /= a[k, k], adapted for loop-invariant shapes
     x = a[k, k]
-    error = error | lax.eq(x, np._constant_like(a, 0))
     a = ops.index_update(a, ops.index[:, k],
                          np.where(m_idx > k, a[:, k] / x, a[:, k]))
 
     # a[k+1:, k+1:] -= np.outer(a[k+1:, k], a[k, k+1:])
     a = a - np.where((m_idx[:, None] > k) & (n_idx > k),
                      np.outer(a[:, k], a[k, :]), np.array(0, dtype=a.dtype))
-    return pivot, perm, a, error
+    return pivot, perm, a
 
   pivot = np.zeros((min(m, n),), dtype=np.int32)
   perm = np.arange(m, dtype=np.int32)
-  error = np.array(False, np.bool_)
   if m == 0 and n == 0:
     # If the array is empty, the loop body never executes but tracing it to a
     # jaxpr fails because the indexing cannot succeed.
-    return (pivot, perm, a, error)
-  return lax.fori_loop(0, min(m, n), body, (pivot, perm, a, error))
+    return (pivot, perm, a)
+  return lax.fori_loop(0, min(m, n), body, (pivot, perm, a))
 
 
 def _lu_blocked(a, block_size=32):
@@ -460,11 +477,9 @@ def _lu_blocked(a, block_size=32):
   m, n = a.shape
   r = min(m, n)
   pivot = np.zeros((r,), dtype=np.int32)
-  error = np.array(False, np.bool_)
   for k in range(0, r, block_size):
     b = min(r - k, block_size)
-    block_pivot, perm, lu_block, block_error = _lu_unblocked(a[k:, k:k+b])
-    error = error | block_error
+    block_pivot, perm, lu_block = _lu_unblocked(a[k:, k:k+b])
     a = ops.index_update(a, ops.index[k:, k:k+b], lu_block)
 
     a = ops.index_update(a, ops.index[k:, :k], a[perm + k, :k])
@@ -480,7 +495,6 @@ def _lu_blocked(a, block_size=32):
         a, ops.index[k+b:, k+b:],
         -lax.dot(a[k+b:, k:k+b], a[k:k+b, k+b:],
                  precision=lax.Precision.HIGHEST))
-  a = np.where(error, lax.full_like(a, np.nan), a)
   return pivot, a
 
 def _lu_python(x):
@@ -517,10 +531,6 @@ def _lu_jvp_rule(primals, tangents):
   a, = primals
   a_dot, = tangents
   lu, pivots = lu_p.bind(a)
-
-  if a_dot is ad_util.zero:
-    return (core.pack((lu, pivots)),
-            ad.TangentTuple((ad_util.zero, ad_util.zero)))
 
   a_shape = np.shape(a)
   m, n = a_shape[-2:]
@@ -577,7 +587,7 @@ def _lu_cpu_gpu_translation_rule(getrf_impl, c, operand):
   lu, pivot, info = getrf_impl(c, operand)
   # Subtract 1 from the pivot to get 0-based indices.
   pivot = c.Sub(pivot, c.ConstantS32Scalar(1))
-  ok = c.Eq(info, c.ConstantS32Scalar(0))
+  ok = c.Ge(info, c.ConstantS32Scalar(0))
   lu = _broadcasting_select(c, c.Reshape(ok, None, batch_dims + (1, 1)), lu,
                             _nan_like(c, lu))
   return c.Tuple(lu, pivot)
@@ -598,6 +608,17 @@ xla.backend_specific_translations['gpu'][lu_p] = partial(
   _lu_cpu_gpu_translation_rule, cusolver.getrf)
 
 
+# Define this outside lu_pivots_to_permutation to ensure fori_loop cache hits
+def _lu_pivots_body_fn(i, permutation_and_swaps):
+  permutation, swaps = permutation_and_swaps
+  batch_dims = swaps.shape[:-1]
+  j = swaps[..., i]
+  iotas = np.ix_(*(lax.iota(np.int32, b) for b in batch_dims))
+  x = permutation[..., i]
+  y = permutation[iotas + (j,)]
+  permutation = ops.index_update(permutation, ops.index[..., i], y)
+  return ops.index_update(permutation, ops.index[iotas + (j,)], x), swaps
+
 def lu_pivots_to_permutation(swaps, m):
   """Converts the pivots (row swaps) returned by LU to a permutation.
 
@@ -614,18 +635,11 @@ def lu_pivots_to_permutation(swaps, m):
   batch_dims = swaps.shape[:-1]
   k = swaps.shape[-1]
 
-  def body_fn(i, permutation):
-    j = swaps[..., i]
-    iotas = np.ix_(*(lax.iota(np.int32, b) for b in batch_dims))
-    x = permutation[..., i]
-    y = permutation[iotas + (j,)]
-    permutation = ops.index_update(permutation, ops.index[..., i], y)
-    return ops.index_update(permutation, ops.index[iotas + (j,)], x)
-
   permutation = lax.broadcasted_iota(np.int32, batch_dims + (m,),
                                      len(batch_dims))
-  return lax.fori_loop(
-    onp.array(0, onp.int32), onp.array(k, onp.int32), body_fn, permutation)
+  result, _ = lax.fori_loop(onp.array(0, onp.int32), onp.array(k, onp.int32),
+                            _lu_pivots_body_fn, (permutation, swaps))
+  return result
 
 
 # QR decomposition
@@ -657,8 +671,6 @@ def qr_jvp_rule(primals, tangents, full_matrices):
   x, = primals
   dx, = tangents
   q, r = qr_p.bind(x, full_matrices=False)
-  if dx is ad_util.zero:
-    return core.pack((q, r)), ad.TangentTuple(ad_util.zero, ad_util.zero)
   if full_matrices or np.shape(x)[-2] < np.shape(x)[-1]:
     raise NotImplementedError
   dx_rinv = triangular_solve(r, dx)  # Right side solve by default
@@ -754,9 +766,6 @@ def svd_jvp_rule(primals, tangents, full_matrices, compute_uv):
   A, = primals
   dA, = tangents
   s, U, Vt = svd_p.bind(A, full_matrices=False, compute_uv=True)
-
-  if dA is ad_util.zero:
-    return ((s, U, Vt), (ad_util.zero, ad_util.zero, ad_util.zero))
 
   if full_matrices:
     # TODO: implement full matrices case, documented here: https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf

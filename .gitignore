@@ -10,3 +10,7 @@ build/
 dist/
 .mypy_cache/
 *png
+docs/notebooks/.ipynb_checkpoints/
+docs/_autosummary
+.idea
+
