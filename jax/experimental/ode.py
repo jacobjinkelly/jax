@@ -272,7 +272,7 @@ def odeint(ofunc, y0, t, *args, **kwargs):
                                   np.zeros((t.shape[0], y0.shape[0])),
                                   jax.ops.index[0, :],
                                   y0),
-                              2))
+                              np.float64(2)))
   solution = result[-2]
   nfe = result[-1]
   return solution, nfe
@@ -346,18 +346,18 @@ def vjp_odeint(ofunc, y0, t, *args, **kwargs):
   @jax.jit
   def vjp_all(g, yt, t):
     """Calculate the VJP g * Jac(odeint(ofunc(yt, t, *args), t)."""
-    rev_yt = yt[-1:0:-1, :]
-    rev_t = t[-1:0:-1]
+    rev_yt = yt[-1::-1, :]
+    rev_t = t[-1::-1]
     rev_tarray = -np.array([t[-1:0:-1], t[-2::-1]]).T
-    rev_gi = g[-1:0:-1, :]
+    rev_gi = g[-1::-1, :]
 
-    vjp_y = rev_gi[-1, :]
+    vjp_y = g[-1, :]
     vjp_t0 = 0.
     vjp_args = np.zeros_like(flat_args)
     time_vjp_list = np.zeros_like(t)
 
     result = jax.lax.fori_loop(0,
-                               rev_t.shape[0],
+                               rev_t.shape[0]-1,
                                _fori_body_fun,
                                (rev_yt,
                                 rev_t,
@@ -367,14 +367,14 @@ def vjp_odeint(ofunc, y0, t, *args, **kwargs):
                                 vjp_t0,
                                 vjp_args,
                                 time_vjp_list,
-                                0))
+                                np.float64(0)))
 
     time_vjp_list = jax.ops.index_update(result[-2], -1, result[-4])
     vjp_times = np.hstack(time_vjp_list)[::-1]
     return tuple([result[-5], vjp_times] + list(result[-3]) + [result[-1]])
 
   primals_out, _ = odeint(flat_func, y0, t, flat_args)
-  vjp_fun = lambda g: vjp_all(g, primals_out, t)
+  vjp_fun = lambda g: vjp_all(g, primals_out, t)[:-1]
 
   return primals_out, vjp_fun
 
@@ -399,7 +399,7 @@ def build_odeint(ofunc, rtol=1.4e-8, atol=1.4e-8):
     `f(y0, t, args) = odeint(ofunc(y, t, *args), y0, t, args)`
   """
   ct_odeint = jax.custom_transforms(
-      lambda y0, t, *args: odeint(ofunc, y0, t, *args, rtol=rtol, atol=atol))
+      lambda y0, t, *args: odeint(ofunc, y0, t, *args, rtol=rtol, atol=atol)[0])
 
   v = lambda y0, t, *args: vjp_odeint(ofunc, y0, t, *args, rtol=rtol, atol=atol)
   jax.defvjp_all(ct_odeint, v)
@@ -421,7 +421,7 @@ def test_grad_odeint():
       return g
 
   def onearg_odeint(args):
-      solution, _ = odeint(f, args[2], args[0], args[1], atol=1e-8, rtol=1e-8)
+      solution, _ = odeint(f, args[2], args[0], args[1])
       return np.sum(solution)
 
   rng = random.PRNGKey(0)
@@ -452,8 +452,8 @@ def test_grad_odeint():
       return predict(params, y)
 
   numerical_grad = nd(onearg_odeint, (y0, np.array([t0, t1]), fargs))
-  ys, _ = odeint(f, fargs, y0, np.array([t0, t1]), atol=1e-8, rtol=1e-8)
-  ode_vjp = grad_odeint(f, fargs)
+  ys, _ = odeint(f, fargs, y0, np.array([t0, t1]))
+  ode_vjp = vjp_odeint(f, fargs)
   g = np.ones_like(ys)
   exact_grad, _ = ravel_pytree(ode_vjp(g, ys, np.array([t0, t1]))[:-1])
 
@@ -489,7 +489,7 @@ def test_grad_loss_odeint():
       """
       Gradient of result of odeint wrt final.
       """
-      ys, _ = odeint(dynamics, args[2], args[0], args[1], atol=1e-8, rtol=1e-8)
+      ys, _ = odeint(dynamics, args[2], args[0], args[1])
       grad_val = grad_loss_fun(ys)
       return np.sum(ys * grad_val)
 
@@ -539,8 +539,8 @@ def test_grad_loss_odeint():
       return flat_predictions
 
   numerical_grad = nd(onearg_odeint, (flat_batch_y0_t, t, fargs))
-  ys, _ = odeint(dynamics, fargs, flat_batch_y0_t, t, atol=1e-8, rtol=1e-8)
-  ode_vjp = grad_odeint(dynamics, fargs)
+  ys, _ = odeint(dynamics, fargs, flat_batch_y0_t, t)
+  ode_vjp = vjp_odeint(dynamics, fargs)
   grad_val = grad_loss_fun(ys)
   exact_grad, ravel_grad = ravel_pytree(ode_vjp(grad_val, ys, t)[:-1])
 
@@ -603,8 +603,8 @@ def test_grad_vjp_odeint():
     return -np.sqrt(t) - y + arg1 - np.mean((y + arg2)**2)
 
   def onearg_odeint(args):
-    return np.sum(
-        odeint(f, *args, atol=1e-8, rtol=1e-8))
+    solution, _ = odeint(f, *args)
+    return np.sum(solution)
 
   dim = 10
   t0 = 0.1
@@ -615,7 +615,7 @@ def test_grad_vjp_odeint():
   wrap_args = (y0, np.array([t0, t1]), arg1, arg2)
 
   numerical_grad = nd(onearg_odeint, wrap_args)
-  exact_grad, _ = ravel_pytree(my_odeint_grad(f)(*wrap_args))
+  exact_grad = ravel_pytree(my_odeint_grad(f)(*wrap_args))[0]
 
   assert np.allclose(numerical_grad, exact_grad)
 
@@ -650,42 +650,73 @@ def swoop(y, t, arg1, arg2):
 def decay(y, t, arg1, arg2):
   return -np.sqrt(t) - y + arg1 - np.mean((y + arg2)**2)
 
+@jax.jit
+def simple(y, t):
+    return y
 
-def benchmark_odeint(fun, y0, tspace, *args):
+
+def _benchmark_odeint(fun, y0, tspace, *args):
   """Time performance of JAX odeint method against scipy.integrate.odeint."""
-  n_trials = 5
+  n_trials = 1
   for k in range(n_trials):
     start = time.time()
     scipy_result = osp_integrate.odeint(fun, y0, tspace, args)
     end = time.time()
-    print('scipy odeint elapsed time ({} of {}): {}'.format(
-        k+1, n_trials, end-start))
+    # print('scipy odeint elapsed time ({} of {}): {}'.format(
+    #     k+1, n_trials, end-start))
   for k in range(n_trials):
     start = time.time()
-    jax_result = odeint(fun, np.array(y0), np.array(tspace), *args)
+    with jax.disable_jit():
+        jax_result, _ = odeint(fun, np.array(y0), np.array(tspace), *args)
     jax_result.block_until_ready()
     end = time.time()
-    print('JAX odeint elapsed time ({} of {}): {}'.format(
-        k+1, n_trials, end-start))
+    # print('JAX odeint elapsed time ({} of {}): {}'.format(
+    #     k+1, n_trials, end-start))
   print('norm(scipy result-jax result): {}'.format(
       np.linalg.norm(np.asarray(scipy_result) - jax_result)))
 
   return scipy_result, jax_result
 
 
-def pend_benchmark_odeint():
-  _, _ = benchmark_odeint(pend,
-                          (onp.pi - 0.1, 0.0),
-                          onp.linspace(0., 10., 101),
-                          0.25,
-                          9.8)
+def benchmark_odeint():
+    """
+    Time performance and correctness test of jax.odeint against scipy.odeint
+    on toy systems.
+    """
+    ts = np.array((0., 5.))
+    y0 = np.linspace(0.1, 0.9, 10)
+    big_y0 = np.ones(1)
 
+    _benchmark_odeint(simple, big_y0, ts)
+
+    # check pend()
+    for cond in (
+            (np.array((onp.pi - 0.1, 0.0)), ts, 0.25, 0.98),
+            (np.array((onp.pi * 0.1, 0.0)), ts, 0.1, 0.4),
+    ):
+        _benchmark_odeint(pend, *cond)
+
+    # check swoop
+    for cond in (
+            (y0, ts, 0.1, 0.2),
+            (big_y0, ts, 0.1, 0.3),
+    ):
+        _benchmark_odeint(swoop, *cond)
+
+    # check decay
+    # for cond in (
+    #         (y0, ts, 0.1, 0.2),
+    #         (big_y0, ts, 0.1, 0.3),
+    # ):
+    #     _benchmark_odeint(decay, *cond)
+    # decay hangs!
 
 def test_odeint_grad():
   """Test the gradient behavior of various ODE integrations."""
   def _test_odeint_grad(func, *args):
     def onearg_odeint(fargs):
-      return np.sum(odeint(func, *fargs))
+      solution, _ = odeint(func, *fargs)
+      return np.sum(solution)
 
     numerical_grad = nd(onearg_odeint, args)
     exact_grad, _ = ravel_pytree(my_odeint_grad(func)(*args))
@@ -726,7 +757,7 @@ def test_odeint_vjp():
   b = 0.25
   c = 9.8
   wrap_args = (y, t, b, c)
-  pend_odeint_wrap = lambda y, t, *args: odeint(pend, y, t, *args)
+  pend_odeint_wrap = lambda y, t, *args: odeint(pend, y, t, *args)[0]
   pend_vjp_wrap = lambda y, t, *args: vjp_odeint(pend, y, t, *args)
   check_vjp(pend_odeint_wrap, pend_vjp_wrap, wrap_args)
 
@@ -736,7 +767,7 @@ def test_odeint_vjp():
   arg1 = 0.1
   arg2 = 0.2
   wrap_args = (y, t, arg1, arg2)
-  swoop_odeint_wrap = lambda y, t, *args: odeint(swoop, y, t, *args)
+  swoop_odeint_wrap = lambda y, t, *args: odeint(swoop, y, t, *args)[0]
   swoop_vjp_wrap = lambda y, t, *args: vjp_odeint(swoop, y, t, *args)
   check_vjp(swoop_odeint_wrap, swoop_vjp_wrap, wrap_args)
 
@@ -763,6 +794,15 @@ def test_defvjp_all():
 
 
 if __name__ == '__main__':
+  from jax.config import config
+  config.update("jax_enable_x64", True)
+  benchmark_odeint()
 
+  test_grad_vjp_odeint()
   test_odeint_grad()
+
   test_odeint_vjp()
+  test_defvjp_all()
+
+  # test_odeint_grad()
+  # test_odeint_vjp()
