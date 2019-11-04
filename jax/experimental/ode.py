@@ -407,106 +407,43 @@ def build_odeint(ofunc, rtol=1.4e-8, atol=1.4e-8):
   return jax.jit(ct_odeint)
 
 
-def test_grad_odeint():
-  """Compare numerical and exact differentiation of a simple odeint."""
+def test_nodes_grad():
+  """Compare numerical and exact differentiation of a Neural ODE."""
 
-  def nd(f, x, eps=0.0001):
-      flat_x, unravel = ravel_pytree(x)
-      dim = len(flat_x)
-      g = onp.zeros_like(flat_x)
-      for i in range(dim):
-          d = onp.zeros_like(flat_x)
-          d[i] = eps
-          g[i] = (f(unravel(flat_x + d)) - f(unravel(flat_x - d))) / (2.0 * eps)
-      return g
-
-  def onearg_odeint(args):
-      solution, _ = odeint(f, args[2], args[0], args[1])
-      return np.sum(solution)
-
-  rng = random.PRNGKey(0)
-  init_random_params, predict = stax.serial(
-      Dense(4), Relu,
-      Dense(4), Relu,
-      Dense(2), LogSoftmax
-  )
-
-  output_shape, init_params = init_random_params(rng, (-1, 2))
-  assert output_shape == (-1, 2)
-
-  dim = 2
-  t0 = 0.1
-  t1 = 0.2
-  y0 = np.linspace(0.1, 0.9, dim)
-  flat_params, params_unravel = ravel_pytree(init_params)
-  fargs = flat_params
-
-  def f(y, t, *args):
+  def loss_fun(pred, target):
       """
-      Simple MLP.
+      Mean squared error.
       """
-      # convert args from Tuple to DeviceArray
-      args, _ = ravel_pytree(args)
-      # convert params to format for predict()
-      params = params_unravel(args)
-      return predict(params, y)
+      return np.mean((pred - target) ** 2)
 
-  numerical_grad = nd(onearg_odeint, (y0, np.array([t0, t1]), fargs))
-  ys, _ = odeint(f, fargs, y0, np.array([t0, t1]))
-  ode_vjp = vjp_odeint(f, fargs)
-  g = np.ones_like(ys)
-  exact_grad, _ = ravel_pytree(ode_vjp(g, ys, np.array([t0, t1]))[:-1])
-
-  assert np.allclose(numerical_grad, exact_grad, atol=1e-6)
-
-
-def test_grad_loss_odeint():
-  """Compare numerical and exact differentiation of a simple odeint."""
-
-  def nd(f, x, eps=0.0001):
-      """
-      Numerically differentiate.
-      """
-      flat_x, unravel = ravel_pytree(x)
-      dim = len(flat_x)
-      g = onp.zeros_like(flat_x)
-      for i in range(dim):
-          print(i + 1, dim)
-          d = onp.zeros_like(flat_x)
-          d[i] = eps
-          g[i] = (f(unravel(flat_x + d)) - f(unravel(flat_x - d))) / (2.0 * eps)
-      return g
-
-  def loss_fun(pred):
-      """
-      Dummy loss function.
-      """
-      return np.sum(pred ** 2) ** 0.5
-
-  grad_loss_fun = grad(loss_fun)
-
-  def onearg_odeint(args):
+  def nodes_predict(args):
       """
       Gradient of result of odeint wrt final.
       """
-      ys, _ = odeint(dynamics, args[2], args[0], args[1])
-      grad_val = grad_loss_fun(ys)
-      return np.sum(ys * grad_val)
+      ys = ravel_batch_y_t(nodes_odeint(*args))[:, :, :-1]
+      return loss_fun(ys, true_y)
 
   dim = 3
   batch_size = 1
 
   rng = random.PRNGKey(0)
   init_random_params, predict = stax.serial(
-      Dense(10), Tanh,
+      Dense(50), Tanh,
       Dense(dim)
   )
 
   output_shape, init_params = init_random_params(rng, (-1, dim + 1))
   assert output_shape == (-1, dim)
 
-  t = np.array([0., 1])  # (T)
-  true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, batch_size), axis=1), dim, axis=1)  # (N, D)
+  true_y0 = np.repeat(np.expand_dims(np.linspace(-.01, .01, batch_size), axis=1), dim, axis=1)  # (N, D)
+  true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
+                            np.expand_dims(true_y0[:, 1] ** 3, axis=1),
+                            np.expand_dims(true_y0[:, 2] ** 4, axis=1)
+                            ), axis=1)
+  true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
+                           np.expand_dims(true_y1, axis=0)),
+                          axis=0)  # (T, N, D)
+  t = np.array([0., 1.])  # (T)
 
   batch_y0_t = np.concatenate((true_y0,
                                np.expand_dims(
@@ -517,9 +454,19 @@ def test_grad_loss_odeint():
   # parse_args.batch_size * (D + 1) |-> (parse_args.batch_size, D + 1)
   flat_batch_y0_t, ravel_batch_y0_t = ravel_pytree(batch_y0_t)
 
+  batch_y_t = np.concatenate((true_y,
+                              np.expand_dims(
+                                  np.tile(t, (batch_size, 1)).T,
+                                  axis=2)),
+                             axis=2)
+
+  # parse_args.batch_time * parse_args.batch_size * (D + 2) |-> (parse_args.batch_time, parse_args.batch_size, D + 2)
+  _, ravel_batch_y_t = ravel_pytree(batch_y_t)
+
   flat_params, ravel_params = ravel_pytree(init_params)
   fargs = flat_params
 
+  @jax.jit
   def dynamics(y_t, t, *args):
       """
       Time-augmented dynamics.
@@ -538,27 +485,26 @@ def test_grad_loss_odeint():
       flat_predictions, _ = ravel_pytree(predictions)
       return flat_predictions
 
-  numerical_grad = nd(onearg_odeint, (flat_batch_y0_t, t, fargs))
-  ys, _ = odeint(dynamics, fargs, flat_batch_y0_t, t)
-  ode_vjp = vjp_odeint(dynamics, fargs)
-  grad_val = grad_loss_fun(ys)
-  exact_grad, ravel_grad = ravel_pytree(ode_vjp(grad_val, ys, t)[:-1])
+  nodes_odeint = build_odeint(dynamics, atol=1e-12, rtol=1e-12)
+
+  numerical_grad = nd(nodes_predict, (flat_batch_y0_t, t, *fargs))
+  exact_grad, ravel_grad = ravel_pytree(grad(nodes_predict)((flat_batch_y0_t, t, *fargs)))
 
   exact_grad = ravel_grad(exact_grad)
   numerical_grad = ravel_grad(numerical_grad)
 
-  tmp1 = exact_grad[1] - numerical_grad[1]
-  tmp2 = exact_grad[2] - numerical_grad[2]
-  tmp3 = exact_grad[3] - numerical_grad[3]
+  tmp1 = exact_grad[0] - numerical_grad[0]
+  tmp2 = exact_grad[1] - numerical_grad[1]
+  tmp3 = np.array(exact_grad[2:]) - np.array(numerical_grad[2:])
 
-  # wrt y0 (fails)
-  # assert np.allclose(exact_grad[1], numerical_grad[1], atol=1e-1)
+  # wrt y0
+  assert np.allclose(exact_grad[0], numerical_grad[0])
 
-  # wrt [t0, t1] (this should be arbitrarily close since the grad is 0)
-  assert np.allclose(exact_grad[2], numerical_grad[2], atol=1e-5)
+  # wrt [t0, t1]
+  assert np.allclose(exact_grad[1], numerical_grad[1])
 
-  # wrt params
-  assert np.allclose(exact_grad[3], numerical_grad[3], atol=1e-4)
+  # wrt params (currently fails, but atol is 1e-3
+  assert np.allclose(np.array(exact_grad[2:]), np.array(numerical_grad[2:]))
 
 
 def my_odeint_grad(fun):
@@ -585,7 +531,7 @@ def my_odeint_jacrev(fun):
   return _jacfun
 
 
-def nd(f, x, eps=0.0001):
+def nd(f, x, eps=1e-5):
   flat_x, unravel = ravel_pytree(x)
   dim = len(flat_x)
   g = onp.zeros_like(flat_x)
@@ -633,9 +579,10 @@ def plot_gradient_field(ax, func, xlimits, ylimits, numticks=30):
 
 
 @jax.jit
-def pend(y, t, arg1, arg2):
+def pend(y, t, *args):
   """Simple pendulum system for odeint testing."""
   del t
+  arg1, arg2 = args
   theta, omega = y
   dydt = np.array([omega, -arg1*omega - arg2*np.sin(theta)])
   return dydt
@@ -711,15 +658,18 @@ def benchmark_odeint():
     #     _benchmark_odeint(decay, *cond)
     # decay hangs!
 
+
 def test_odeint_grad():
   """Test the gradient behavior of various ODE integrations."""
   def _test_odeint_grad(func, *args):
+
+    func_build = build_odeint(func)
+
     def onearg_odeint(fargs):
-      solution, _ = odeint(func, *fargs)
-      return np.sum(solution)
+      return np.sum(func_build(*fargs))
 
     numerical_grad = nd(onearg_odeint, args)
-    exact_grad, _ = ravel_pytree(my_odeint_grad(func)(*args))
+    exact_grad, _ = ravel_pytree(grad(onearg_odeint)(args))
     assert np.allclose(numerical_grad, exact_grad)
 
   ts = np.array((0.1, 0.2))
@@ -804,5 +754,4 @@ if __name__ == '__main__':
   test_odeint_vjp()
   test_defvjp_all()
 
-  # test_odeint_grad()
-  # test_odeint_vjp()
+  test_nodes_grad()
