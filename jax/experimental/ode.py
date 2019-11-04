@@ -420,11 +420,18 @@ def test_nodes_grad():
       """
       Gradient of result of odeint wrt final.
       """
-      ys = ravel_batch_y_t(nodes_odeint(*args))[:, :, :-1]
+      # TODO: is this sketchy to be indexing like this? Should we be including the loss wrt t0?
+      ys = ravel_batch_y_t_r_allr(nodes_odeint(*args))[:, :, :dim]
       return loss_fun(ys, true_y)
 
   dim = 3
-  batch_size = 1
+  batch_size = 5
+  batch_time = 2
+
+  REGS = ['r0', 'r1']
+  NUM_REGS = len(REGS)
+
+  reg = "r1"
 
   rng = random.PRNGKey(0)
   init_random_params, predict = stax.serial(
@@ -445,29 +452,60 @@ def test_nodes_grad():
                           axis=0)  # (T, N, D)
   t = np.array([0., 1.])  # (T)
 
+  r0 = np.zeros((batch_size, 1))
+
   batch_y0_t = np.concatenate((true_y0,
                                np.expand_dims(
                                    np.repeat(t[0], batch_size),
                                    axis=1)
                                ),
                               axis=1)
-  # parse_args.batch_size * (D + 1) |-> (parse_args.batch_size, D + 1)
-  flat_batch_y0_t, ravel_batch_y0_t = ravel_pytree(batch_y0_t)
 
-  batch_y_t = np.concatenate((true_y,
-                              np.expand_dims(
-                                  np.tile(t, (batch_size, 1)).T,
-                                  axis=2)),
-                             axis=2)
+  batch_y0_t_r0 = np.concatenate((batch_y0_t, r0), axis=1)
+
+  # parse_args.batch_size * (D + 2) |-> (parse_args.batch_size, D + 2)
+  _, ravel_batch_y0_t_r0 = ravel_pytree(batch_y0_t_r0)
+
+  allr0 = np.zeros((batch_size, NUM_REGS))
+  batch_y0_t_r0_allr0 = np.concatenate((batch_y0_t, r0, allr0), axis=1)
+
+  # parse_args.batch_size * (D + 2 + NUM_REGS) |-> (parse_args.batch_size, D + 2 + NUM_REGS)
+  flat_batch_y0_t_r0_allr0, ravel_batch_y0_t_r0_allr0 = ravel_pytree(batch_y0_t_r0_allr0)
+
+  r = np.zeros((batch_time, batch_size, 1))
+  batch_y_r = np.concatenate((true_y, r), axis=2)
+
+  # parse_args.batch_time * parse_args.batch_size * (D + 1) |-> (parse_args.batch_time, parse_args.batch_size, D + 1)
+  _, ravel_batch_y_r = ravel_pytree(batch_y_r)
+
+  batch_y_t_r = np.concatenate((true_y,
+                                np.expand_dims(
+                                    np.tile(t, (batch_size, 1)).T,
+                                    axis=2),
+                                r),
+                               axis=2)
 
   # parse_args.batch_time * parse_args.batch_size * (D + 2) |-> (parse_args.batch_time, parse_args.batch_size, D + 2)
-  _, ravel_batch_y_t = ravel_pytree(batch_y_t)
+  _, ravel_batch_y_t_r = ravel_pytree(batch_y_t_r)
+
+  allr = np.zeros((batch_time, batch_size, NUM_REGS))
+  batch_y_t_r_allr = np.concatenate((true_y,
+                                     np.expand_dims(
+                                         np.tile(t, (batch_size, 1)).T,
+                                         axis=2),
+                                     r,
+                                     allr),
+                                    axis=2)
+
+  # parse_args.batch_time * parse_args.batch_size * (D + 2 + NUM_REGS) |->
+  #                                                   (parse_args.batch_time, parse_args.batch_size, D + 2 + NUM_REGS)
+  _, ravel_batch_y_t_r_allr = ravel_pytree(batch_y_t_r_allr)
 
   flat_params, ravel_params = ravel_pytree(init_params)
   fargs = flat_params
 
   @jax.jit
-  def dynamics(y_t, t, *args):
+  def reg_dynamics(y_t_r_allr, t, *args):
       """
       Time-augmented dynamics.
       """
@@ -475,20 +513,40 @@ def test_nodes_grad():
       flat_params = args
       params = ravel_params(np.array(flat_params))
 
-      y_t = ravel_batch_y0_t(y_t)
+      # separate out state from augmented
+      y_t_r_allr = ravel_batch_y0_t_r0_allr0(y_t_r_allr)
+      y_t = y_t_r_allr[:, :dim + 1]
+      y = y_t[:, :-1]
 
       predictions_y = predict(params, y_t)
       predictions = np.concatenate((predictions_y,
                                     np.ones((batch_size, 1))),
                                    axis=1)
 
-      flat_predictions, _ = ravel_pytree(predictions)
-      return flat_predictions
+      r0 = np.sum(y ** 2, axis=1) ** 0.5
+      r1 = np.sum(predictions_y ** 2, axis=1) ** 0.5
+      # TODO: this conditional is probably where the bug is!
+      #   it relies on the value of a global variable! although the shapes are the same...
+      #   but regardless, this is definitely the most sketchy part
+      if reg == "r0":
+          regularization = r0
+      elif reg == "r1":
+          regularization = r1
+      else:
+          regularization = np.zeros(batch_size)
 
-  nodes_odeint = build_odeint(dynamics, atol=1e-12, rtol=1e-12)
+      pred_reg = np.concatenate((predictions,
+                                 np.expand_dims(regularization, axis=1),
+                                 np.expand_dims(r0, axis=1),
+                                 np.expand_dims(r1, axis=1)),
+                                axis=1)
+      flat_pred_reg, _ = ravel_pytree(pred_reg)
+      return flat_pred_reg
 
-  numerical_grad = nd(nodes_predict, (flat_batch_y0_t, t, *fargs))
-  exact_grad, ravel_grad = ravel_pytree(grad(nodes_predict)((flat_batch_y0_t, t, *fargs)))
+  nodes_odeint = build_odeint(reg_dynamics, atol=1e-12, rtol=1e-12)
+
+  numerical_grad = nd(nodes_predict, (flat_batch_y0_t_r0_allr0, t, *fargs))
+  exact_grad, ravel_grad = ravel_pytree(grad(nodes_predict)((flat_batch_y0_t_r0_allr0, t, *fargs)))
 
   exact_grad = ravel_grad(exact_grad)
   numerical_grad = ravel_grad(numerical_grad)
@@ -503,7 +561,7 @@ def test_nodes_grad():
   # wrt [t0, t1]
   assert np.allclose(exact_grad[1], numerical_grad[1])
 
-  # wrt params (currently fails, but atol is 1e-3
+  # wrt params (currently fails, but atol is still pretty good)
   assert np.allclose(np.array(exact_grad[2:]), np.array(numerical_grad[2:]))
 
 
