@@ -410,6 +410,22 @@ def build_odeint(ofunc, rtol=1.4e-8, atol=1.4e-8):
 def test_nodes_grad():
   """Compare numerical and exact differentiation of a Neural ODE."""
 
+  @jax.jit
+  def total_loss_fun(pred_y_t_r, target):
+      """
+      Loss function.
+      """
+      pred, reg = pred_y_t_r[:, :, :dim], pred_y_t_r[:, :, dim + 1]
+      return loss_fun(pred, target) + lam * reg_loss(reg)
+
+  @jax.jit
+  def reg_loss(reg):
+      """
+      Regularization loss function.
+      """
+      return np.mean(reg)
+
+  @jax.jit
   def loss_fun(pred, target):
       """
       Mean squared error.
@@ -420,13 +436,13 @@ def test_nodes_grad():
       """
       Gradient of result of odeint wrt final.
       """
-      # TODO: is this sketchy to be indexing like this? Should we be including the loss wrt t0?
-      ys = ravel_batch_y_t_r_allr(nodes_odeint(*args))[:, :, :dim]
-      return loss_fun(ys, true_y)
+      ys = ravel_batch_y_t_r_allr(nodes_odeint(*args))
+      return total_loss_fun(ys, true_y)
 
   dim = 3
   batch_size = 5
   batch_time = 2
+  lam = 1
 
   REGS = ['r0', 'r1']
   NUM_REGS = len(REGS)
@@ -525,9 +541,6 @@ def test_nodes_grad():
 
       r0 = np.sum(y ** 2, axis=1) ** 0.5
       r1 = np.sum(predictions_y ** 2, axis=1) ** 0.5
-      # TODO: this conditional is probably where the bug is!
-      #   it relies on the value of a global variable! although the shapes are the same...
-      #   but regardless, this is definitely the most sketchy part
       if reg == "r0":
           regularization = r0
       elif reg == "r1":
