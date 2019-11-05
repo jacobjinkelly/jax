@@ -25,10 +25,10 @@ NUM_REGS = len(REGS)
 
 parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
-parser.add_argument('--data_size', type=int, default=1)
+parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=2)
-parser.add_argument('--batch_size', type=int, default=1)
-parser.add_argument('--nepochs', type=int, default=500)
+parser.add_argument('--batch_size', type=int, default=50)
+parser.add_argument('--nepochs', type=int, default=1)
 parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
@@ -42,13 +42,13 @@ parse_args = parser.parse_args()
 config.update('jax_enable_x64', True)
 
 D = 1
-true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, parse_args.data_size), axis=1), D, axis=1)  # (N, D)
+true_y0 = np.repeat(np.expand_dims(np.linspace(-0.5, 0.5, parse_args.data_size), axis=1), D, axis=1)  # (N, D)
 # true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
 #                           np.expand_dims(true_y0[:, 1] ** 3, axis=1),
 #                           np.expand_dims(true_y0[:, 2] ** 4, axis=1)
 #                           ),
 #                          axis=1)
-true_y1 = np.expand_dims(true_y0[:, 0] ** 2, axis=1)
+true_y1 = np.expand_dims(true_y0[:, 0], axis=1)
 true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
                         np.expand_dims(true_y1, axis=0)),
                         axis=0)  # (T, N, D)
@@ -306,16 +306,16 @@ def run(reg, lam, key, dirname):
             flat_batch_y0_t_r0_allr0 = np.reshape(batch_y0_t_r0_allr0, (-1,))
 
             fargs = get_params(opt_state)
-
-            # integrate unregularized system and count NFE
-            pred_y_t, nfe = unreg_nodes_odeint(flat_batch_y0_t, batch_t, fargs)
-            print("forward NFE: %d" % nfe)
-
-            # integrate adjoint ODE to count NFE
-            nodes_odeint_vjp = unreg_nodes_odeint_vjp(flat_batch_y0_t, batch_t, fargs)
-            grad_loss = grad_loss_fn(pred_y_t, batch_y)
-            nfe = nodes_odeint_vjp(grad_loss)[-1]
-            print("backward NFE: %d" % nfe)
+            #
+            # # integrate unregularized system and count NFE
+            # pred_y_t, nfe = unreg_nodes_odeint(flat_batch_y0_t, batch_t, fargs)
+            # print("forward NFE: %d" % nfe)
+            #
+            # # integrate adjoint ODE to count NFE
+            # nodes_odeint_vjp = unreg_nodes_odeint_vjp(flat_batch_y0_t, batch_t, fargs)
+            # grad_loss = grad_loss_fn(pred_y_t, batch_y)
+            # nfe = nodes_odeint_vjp(grad_loss)[-1]
+            # print("backward NFE: %d" % nfe)
 
             total_loss_grad = grad_predict((batch_y, flat_batch_y0_t_r0_allr0, batch_t, *fargs))
             params_grad = np.array(total_loss_grad[3:])

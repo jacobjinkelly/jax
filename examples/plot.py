@@ -16,7 +16,7 @@ config.update('jax_enable_x64', True)
 
 key = random.PRNGKey(0)
 
-dirname = "2019-10-07-14-02-59"
+dirname = "tmp4"
 results_path = "%s/results.txt" % dirname
 
 file = open(results_path, "r")
@@ -427,7 +427,7 @@ def new_dynamics():
     REGS = ['r0', 'r1']
     NUM_REGS = len(REGS)
 
-    dim_fns = {"x^2": lambda x: x ** 2,
+    dim_fns = {"x": lambda x: x,
                # "x^3": lambda x: x ** 3,
                # "x^4": lambda x: x ** 4
                }
@@ -437,12 +437,12 @@ def new_dynamics():
     #                           np.expand_dims(dim_fns["x^3"](true_y0[:, 1]), axis=1),
     #                           np.expand_dims(dim_fns["x^4"](true_y0[:, 2]), axis=1)),
     #                          axis=1)
-    true_y1 = np.expand_dims(true_y0[:, 0] ** 2, axis=1)
+    true_y1 = np.expand_dims(true_y0[:, 0], axis=1)
     true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
                             np.expand_dims(true_y1, axis=0)),
                             axis=0)  # (TIME_POINTS, DATA_SIZE, D)
-    t = np.array([0., 25.])  # (TIME_POINTS, )
-    total_t = np.linspace(0., 25., num=TOTAL_TIME_POINTS)  # (TOTAL_TIME_POINTS, )
+    t = np.array([0., 1.])  # (TIME_POINTS, )
+    total_t = np.linspace(0., 1., num=TOTAL_TIME_POINTS)  # (TOTAL_TIME_POINTS, )
 
     r = np.zeros((TOTAL_TIME_POINTS, DATA_SIZE, 1))
     allr = np.zeros((TOTAL_TIME_POINTS, DATA_SIZE, NUM_REGS))
@@ -515,10 +515,16 @@ def new_dynamics():
         flat_pred_reg, _ = ravel_pytree(pred_reg)
         return flat_pred_reg
 
+    plot_points = {
+        "none": {
+            "lam": [0]
+        }
+    }
+
     for reg in plot_points:
         for lam_rank, lam in enumerate(sorted(plot_points[reg]["lam"])):
-            num_epochs = 50
-            iters_per_epoch = 50
+            num_epochs = 1
+            iters_per_epoch = 20
 
             for itr in range(iters_per_epoch, 2 * iters_per_epoch + 1, iters_per_epoch):
 
@@ -528,7 +534,7 @@ def new_dynamics():
                 params = pickle.load(param_file)
                 fargs = params
 
-                pred_y_t_r_allr, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0_allr, total_t, atol=1e-8, rtol=1e-8)
+                pred_y_t_r_allr, _ = odeint(test_reg_dynamics, flat_true_y0_t_r0_allr, total_t, *fargs)
 
                 pred_y_t_r_allr = ravel_true_y_t_r_allr(pred_y_t_r_allr)
                 pred_y = pred_y_t_r_allr[:, :, :D]
