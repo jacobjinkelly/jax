@@ -14,7 +14,7 @@ import sys
 import jax
 from jax.experimental import stax, optimizers
 from jax.experimental.stax import Dense, Tanh
-from jax.experimental.ode import odeint, grad_odeint
+from jax.experimental.ode import odeint, build_odeint, vjp_odeint
 from jax import random, grad
 import jax.numpy as np
 from jax.config import config
@@ -32,7 +32,7 @@ parser.add_argument('--nepochs', type=int, default=500)
 parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
-parser.add_argument('--dirname', type=str, default='tmp3')
+parser.add_argument('--dirname', type=str, default='tmp4')
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -43,7 +43,7 @@ config.update('jax_enable_x64', True)
 
 D = 1
 true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, parse_args.data_size), axis=1), D, axis=1)  # (N, D)
-# true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1)
+# true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
 #                           np.expand_dims(true_y0[:, 1] ** 3, axis=1),
 #                           np.expand_dims(true_y0[:, 2] ** 4, axis=1)
 #                           ),
@@ -52,7 +52,7 @@ true_y1 = np.expand_dims(true_y0[:, 0] ** 2, axis=1)
 true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
                         np.expand_dims(true_y1, axis=0)),
                         axis=0)  # (T, N, D)
-t = np.array([0., 1])  # (T)
+t = np.array([0., 1.])  # (T)
 
 
 def get_batch(shuffled_inds, batch):
@@ -85,16 +85,10 @@ def run(reg, lam, key, dirname):
     # define ravel objects
 
     flat_params, ravel_params = ravel_pytree(init_params)
+
     batch_y0, batch_t, batch_y = get_batch(np.arange(parse_args.data_size, dtype=np.int64), 0)
 
     r0 = np.zeros((parse_args.batch_size, 1))
-    batch_y0_r0 = np.concatenate((batch_y0, r0), axis=1)
-
-    # parse_args.batch_size * (D + 1) |-> (parse_args.batch_size, D + 1)
-    _, ravel_batch_y0_r0 = ravel_pytree(batch_y0_r0)
-
-    # parse_args.batch_size * D  |-> (parse_args.batch_size, D)
-    _, ravel_batch_y0 = ravel_pytree(batch_y0)
 
     batch_y0_t = np.concatenate((batch_y0,
                                  np.expand_dims(
@@ -105,11 +99,6 @@ def run(reg, lam, key, dirname):
     # parse_args.batch_size * (D + 1) |-> (parse_args.batch_size, D + 1)
     _, ravel_batch_y0_t = ravel_pytree(batch_y0_t)
 
-    batch_y0_t_r0 = np.concatenate((batch_y0_t, r0), axis=1)
-
-    # parse_args.batch_size * (D + 2) |-> (parse_args.batch_size, D + 2)
-    _, ravel_batch_y0_t_r0 = ravel_pytree(batch_y0_t_r0)
-
     allr0 = np.zeros((parse_args.batch_size, NUM_REGS))
     batch_y0_t_r0_allr0 = np.concatenate((batch_y0_t, r0, allr0), axis=1)
 
@@ -117,20 +106,6 @@ def run(reg, lam, key, dirname):
     _, ravel_batch_y0_t_r0_allr0 = ravel_pytree(batch_y0_t_r0_allr0)
 
     r = np.zeros((parse_args.batch_time, parse_args.batch_size, 1))
-    batch_y_r = np.concatenate((batch_y, r), axis=2)
-
-    # parse_args.batch_time * parse_args.batch_size * (D + 1) |-> (parse_args.batch_time, parse_args.batch_size, D + 1)
-    _, ravel_batch_y_r = ravel_pytree(batch_y_r)
-
-    batch_y_t_r = np.concatenate((batch_y,
-                                  np.expand_dims(
-                                      np.tile(batch_t, (parse_args.batch_size, 1)).T,
-                                      axis=2),
-                                  r),
-                                 axis=2)
-
-    # parse_args.batch_time * parse_args.batch_size * (D + 2) |-> (parse_args.batch_time, parse_args.batch_size, D + 2)
-    _, ravel_batch_y_t_r = ravel_pytree(batch_y_t_r)
 
     allr = np.zeros((parse_args.batch_time, parse_args.batch_size, NUM_REGS))
     batch_y_t_r_allr = np.concatenate((batch_y,
@@ -145,8 +120,30 @@ def run(reg, lam, key, dirname):
     #                                                   (parse_args.batch_time, parse_args.batch_size, D + 2 + NUM_REGS)
     _, ravel_batch_y_t_r_allr = ravel_pytree(batch_y_t_r_allr)
 
-    # parse_args.batch_size * D |-> (parse_args.batch_size, D)
-    _, ravel_batch_y = ravel_pytree(batch_y)
+    test_r = np.zeros((parse_args.batch_time, parse_args.data_size, 1))
+    test_allr = np.zeros((parse_args.batch_time, parse_args.data_size, NUM_REGS))
+    true_y_t_r_allr = np.concatenate((true_y,
+                                      np.expand_dims(
+                                          np.tile(batch_t, (parse_args.data_size, 1)).T,
+                                          axis=2),
+                                      test_r,
+                                      test_allr),
+                                     axis=2)
+
+    # parse_args.batch_time * parse_args.data_size * (D + 2 + NUM_REGS) |->
+    #                                       (parse_args.batch_time, parse_args.data_size, D + 2 + NUM_REGS)
+    _, ravel_true_y_t_r_allr = ravel_pytree(true_y_t_r_allr)
+
+    test_r0 = np.zeros((parse_args.data_size, 1))
+    test_allr = np.zeros((parse_args.data_size, NUM_REGS))
+    true_y0_t_r0_allr = np.concatenate((true_y0,
+                                        np.expand_dims(
+                                            np.repeat(t[0], parse_args.data_size), axis=1),
+                                        test_r0,
+                                        test_allr), axis=1)
+
+    # parse_args.data_size * (D + 2 + NUM_REGS) |-> (parse_args.data_size, D + 2 + NUM_REGS)
+    flat_true_y0_t_r0_allr, ravel_true_y0_t_r0_allr = ravel_pytree(true_y0_t_r0_allr)
 
     fargs = flat_params
 
@@ -165,7 +162,7 @@ def run(reg, lam, key, dirname):
                                       np.ones((parse_args.batch_size, 1))),
                                      axis=1)
 
-        flat_predictions, _ = ravel_pytree(predictions)
+        flat_predictions = np.reshape(predictions, (-1,))
         return flat_predictions
 
     def reg_dynamics(y_t_r_allr, t, *args):
@@ -200,7 +197,7 @@ def run(reg, lam, key, dirname):
                                    np.expand_dims(r0, axis=1),
                                    np.expand_dims(r1, axis=1)),
                                   axis=1)
-        flat_pred_reg, _ = ravel_pytree(pred_reg)
+        flat_pred_reg = np.reshape(pred_reg, (-1,))
         return flat_pred_reg
 
     def test_reg_dynamics(y_t_r_allr, t, *args):
@@ -235,7 +232,7 @@ def run(reg, lam, key, dirname):
                                    np.expand_dims(r0, axis=1),
                                    np.expand_dims(r1, axis=1)),
                                   axis=1)
-        flat_pred_reg, _ = ravel_pytree(pred_reg)
+        flat_pred_reg = np.reshape(pred_reg, (-1,))
         return flat_pred_reg
 
     @jax.jit
@@ -256,21 +253,35 @@ def run(reg, lam, key, dirname):
     @jax.jit
     def loss_fun(pred, target):
         """
-        Mean absolute error.
+        Mean squared error.
         """
         return np.mean((pred - target) ** 2)
 
-    ode_vjp = grad_odeint(dynamics, fargs)
-    reg_ode_vjp = grad_odeint(reg_dynamics, fargs)
-    grad_total_loss_fun = jax.jit(grad(total_loss_fun))
-    grad_loss_fun = jax.jit(grad(loss_fun))
-    grad_reg_loss_fun = jax.jit(grad(reg_loss))
+    @jax.jit
+    def nodes_predict(args):
+        """
+        Evaluate loss on model's predictions.
+        """
+        true_ys, odeint_args = args[0], args[1:]
+        ys = ravel_batch_y_t_r_allr(nodes_odeint(*odeint_args))
+        return total_loss_fun(ys, true_ys)
+
+    unreg_nodes_odeint = jax.jit(lambda y0, t, args: odeint(dynamics, y0, t, *args))
+    unreg_nodes_odeint_vjp = lambda y0, t, args: vjp_odeint(dynamics, y0, t, *args, nfe=True)[1]
+    grad_loss_fn = grad(loss_fun)
+
+    nodes_odeint = build_odeint(reg_dynamics)
+    grad_predict = grad(nodes_predict)
+
+    nodes_odeint_test = build_odeint(test_reg_dynamics)
 
     opt_init, opt_update, get_params = optimizers.rmsprop(step_size=1e-3, gamma=0.99)
 
     opt_state = opt_init(fargs)
+
     assert parse_args.data_size % parse_args.batch_size == 0
     batch_per_epoch = parse_args.data_size // parse_args.batch_size
+
     for epoch in range(parse_args.nepochs):
 
         new_key, subkey = random.split(key)
@@ -288,130 +299,48 @@ def run(reg, lam, key, dirname):
                                             axis=1)
                                          ),
                                         axis=1)
-            flat_batch_y0_t, _ = ravel_pytree(batch_y0_t)
+            flat_batch_y0_t = np.reshape(batch_y0_t, (-1,))
             r0 = np.zeros((parse_args.batch_size, 1))
             allr0 = np.zeros((parse_args.batch_size, NUM_REGS))
             batch_y0_t_r0_allr0 = np.concatenate((batch_y0_t, r0, allr0), axis=1)
-            flat_batch_y0_t_r0_allr0, _ = ravel_pytree(batch_y0_t_r0_allr0)
+            flat_batch_y0_t_r0_allr0 = np.reshape(batch_y0_t_r0_allr0, (-1,))
 
             fargs = get_params(opt_state)
 
-            # integrate ODE (including reg) and count NFE (on unreg)
-            tmp_pred_y_t, nfe = odeint(dynamics, fargs, flat_batch_y0_t, batch_t, atol=1e-8, rtol=1e-8)
-            pred_y_t_r_allr, _ = odeint(reg_dynamics, fargs, flat_batch_y0_t_r0_allr0, batch_t, atol=1e-8, rtol=1e-8)
+            # integrate unregularized system and count NFE
+            pred_y_t, nfe = unreg_nodes_odeint(flat_batch_y0_t, batch_t, fargs)
             print("forward NFE: %d" % nfe)
 
-            # parse_args.batch_time * parse_args.batch_size * (D + 1) |->
-            #                                                   (parse_args.batch_time, parse_args.batch_size * (D + 1))
-            _, ravel_pred_y_t = ravel_pytree(tmp_pred_y_t)
-
-            # (parse_args.batch_time * parse_args.batch_size * (D + 2 + NUM_REGS)) |->
-            #                                       (parse_args.batch_time, parse_args.batch_size * (D + 2 + NUM_REGS))
-            _, ravel_pred_y_t_r_allr = ravel_pytree(pred_y_t_r_allr)
-
-            pred_y_t_r_allr = ravel_batch_y_t_r_allr(pred_y_t_r_allr)
-            pred_y = pred_y_t_r_allr[:, :, :D]
-            pred_y_t = pred_y_t_r_allr[:, :, :D + 1]
-            pred_y_t_r = pred_y_t_r_allr[:, :, :D + 2]
-
-            # check that manual integration worked
-            final_t = pred_y_t[:, :, -1]
-            assert np.allclose(final_t, np.tile(batch_t, (parse_args.batch_size, 1)).T)
-
-            pred_y_t = ravel_pred_y_t(pred_y_t)
-
-            # (parse_args.batch_time * parse_args.batch_size * (D + 2) |->
-            #                                                   (parse_args.batch_time, parse_args.batch_size, D + 2)
-            _, ravel_pred_y_t_r = ravel_pytree(pred_y_t_r)
-            pred_y_t_r_allr = ravel_pred_y_t_r_allr(pred_y_t_r_allr)
-
-            total_loss_grad = grad_total_loss_fun(ravel_batch_y_t_r(pred_y_t_r), batch_y)
-
-            loss_grad_allr = np.concatenate((total_loss_grad,
-                                             np.zeros((parse_args.batch_time, parse_args.batch_size, NUM_REGS))),
-                                            axis=2)
-
-            # integrate adjoint ODE and count NFE
-            nfe = ode_vjp(ravel_pred_y_t(total_loss_grad[:, :, :-1]), pred_y_t, batch_t)[-1]
-            params_grad = reg_ode_vjp(ravel_pred_y_t_r_allr(loss_grad_allr), pred_y_t_r_allr, batch_t)[:-1][3]
+            # integrate adjoint ODE to count NFE
+            nodes_odeint_vjp = unreg_nodes_odeint_vjp(flat_batch_y0_t, batch_t, fargs)
+            grad_loss = grad_loss_fn(pred_y_t, batch_y)
+            nfe = nodes_odeint_vjp(grad_loss)[-1]
             print("backward NFE: %d" % nfe)
 
+            total_loss_grad = grad_predict((batch_y, flat_batch_y0_t_r0_allr0, batch_t, *fargs))
+            params_grad = np.array(total_loss_grad[3:])
             opt_state = opt_update(itr, params_grad, opt_state)
 
             if itr % parse_args.test_freq == 0:
                 fargs = get_params(opt_state)
 
-                # get gradient wrt regularization
-                loss_grad = grad_loss_fun(ravel_batch_y(pred_y), batch_y)
-                reg_loss_grad = grad_reg_loss_fun(pred_y_t_r[:, :, -1])
-                manual_total_loss_grad = np.concatenate((loss_grad,
-                                                         np.zeros((parse_args.batch_time, parse_args.batch_size, 1)),
-                                                         lam * np.expand_dims(reg_loss_grad, axis=2)),
-                                                        axis=2)
-                assert np.allclose(manual_total_loss_grad, total_loss_grad)
+                pred_y_t_r_allr = ravel_true_y_t_r_allr(nodes_odeint_test(flat_true_y0_t_r0_allr, t, *fargs))
 
-                manual_total_loss_grad_allr = np.concatenate((manual_total_loss_grad,
-                                                              np.zeros((parse_args.batch_time, parse_args.batch_size,
-                                                                        NUM_REGS))),
-                                                             axis=2)
-
-                cotangent_mask = np.zeros((parse_args.batch_time, parse_args.batch_size, D + 2 + NUM_REGS))
-
-                loss_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, :D], 1)
-                reg_cotangent_mask = jax.ops.index_update(cotangent_mask, jax.ops.index[:, :, D + 1], 1)
-
-                loss_grad = reg_ode_vjp(ravel_pred_y_t_r_allr(manual_total_loss_grad_allr * loss_cotangent_mask),
-                                        pred_y_t_r_allr, batch_t)[:-1][3]
-                reg_grad = reg_ode_vjp(ravel_pred_y_t_r_allr(manual_total_loss_grad_allr * reg_cotangent_mask),
-                                       pred_y_t_r_allr, batch_t)[:-1][3]
-
-                loss_grad_norm = np.sqrt(np.sum(loss_grad ** 2))
-                reg_grad_norm = np.sqrt(np.sum(reg_grad ** 2))
-
-                # calculate loss
-                r = np.zeros((parse_args.batch_time, parse_args.data_size, 1))
-                allr = np.zeros((parse_args.batch_time, parse_args.data_size, NUM_REGS))
-                true_y_t_r_allr = np.concatenate((true_y,
-                                                  np.expand_dims(
-                                                      np.tile(batch_t, (parse_args.data_size, 1)).T,
-                                                      axis=2),
-                                                  r,
-                                                  allr),
-                                                 axis=2)
-
-                # parse_args.batch_time * parse_args.data_size * (D + 2 + NUM_REGS) |->
-                #                                       (parse_args.batch_time, parse_args.data_size, D + 2 + NUM_REGS)
-                _, ravel_true_y_t_r_allr = ravel_pytree(true_y_t_r_allr)
-
-                r0 = np.zeros((parse_args.data_size, 1))
-                allr = np.zeros((parse_args.data_size, NUM_REGS))
-                true_y0_t_r0_allr = np.concatenate((true_y0,
-                                                    np.expand_dims(
-                                                        np.repeat(t[0], parse_args.data_size), axis=1),
-                                                    r0,
-                                                    allr), axis=1)
-
-                # parse_args.data_size * (D + 2 + NUM_REGS) |-> (parse_args.data_size, D + 2 + NUM_REGS)
-                flat_true_y0_t_r0_allr, ravel_true_y0_t_r0_allr = ravel_pytree(true_y0_t_r0_allr)
-                pred_y_t_r_allr, _ = odeint(test_reg_dynamics, fargs, flat_true_y0_t_r0_allr, t, atol=1e-8, rtol=1e-8)
-
-                pred_y_t_r_allr = ravel_true_y_t_r_allr(pred_y_t_r_allr)
                 pred_y = pred_y_t_r_allr[:, :, :D]
                 pred_y_t_r = pred_y_t_r_allr[:, :, :D + 2]
+
+                loss = loss_fun(pred_y, true_y)
+                total_loss = total_loss_fun(pred_y_t_r, true_y)
 
                 r0 = np.mean(pred_y_t_r_allr[1, :, -2])
                 r1 = np.mean(pred_y_t_r_allr[1, :, -1])
 
-                loss = loss_fun(pred_y, true_y)
-                total_loss = total_loss_fun(pred_y_t_r, true_y)
                 print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | '
-                      'Loss Grad Norm {:.6f} | Reg Grad Norm {:.6f} | r0 {:.6f} | r1 {:.6f}'.
-                      format(itr, total_loss, loss,
-                             loss_grad_norm, reg_grad_norm, r0, r1))
+                      'r0 {:.6f} | r1 {:.6f}'.
+                      format(itr, total_loss, loss, r0, r1))
                 print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | '
-                      'Loss Grad Norm {:.6f} | Reg Grad Norm {:.6f} | r0 {:.6f} | r1 {:.6f}'.
-                      format(itr, total_loss, loss,
-                             loss_grad_norm, reg_grad_norm, r0, r1),
+                      'r0 {:.6f} | r1 {:.6f}'.
+                      format(itr, total_loss, loss, r0, r1),
                       file=sys.stderr)
 
         param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, (epoch + 1) * batch_per_epoch)
