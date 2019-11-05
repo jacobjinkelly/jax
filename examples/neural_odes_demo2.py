@@ -297,7 +297,11 @@ def run(reg, lam, key, dirname):
 
     # unregularized system for counting NFE
     unreg_nodes_odeint = jax.jit(lambda y0, t, args: odeint(dynamics, y0, t, *args))
-    unreg_nodes_odeint_vjp = lambda y0, t, args: vjp_odeint(dynamics, y0, t, *args, nfe=True)[1]
+    unreg_nodes_odeint_vjp = jax.jit(lambda cotangent, y0, t, args:
+                                     vjp_odeint(dynamics, y0, t, *args, nfe=True)[1](np.reshape(cotangent,
+                                                                                                (parse_args.batch_time,
+                                                                                                 parse_args.batch_size *
+                                                                                                 (D + 1))))[-1])
     grad_loss_fn = grad(loss_fun)
 
     # full system for training
@@ -327,17 +331,16 @@ def run(reg, lam, key, dirname):
             fargs = get_params(opt_state)
 
             # integrate unregularized system and count NFE
-            # pred_y_t, nfe = unreg_nodes_odeint(flat_batch_y0_t, batch_t, fargs)
-            # print("forward NFE: %d" % nfe)
-            #
-            # # integrate adjoint ODE to count NFE
-            # nodes_odeint_vjp = unreg_nodes_odeint_vjp(flat_batch_y0_t, batch_t, fargs)
-            # grad_loss = grad_loss_fn(ravel_batch_y_t(pred_y_t)[:, :, :D], batch_y)
-            # cotangent = np.concatenate((grad_loss,
-            #                             np.zeros((parse_args.batch_time, parse_args.batch_size, 1))),
-            #                            axis=2)
-            # nfe = nodes_odeint_vjp(np.reshape(cotangent, (parse_args.batch_time, parse_args.batch_size * (D + 1))))[-1]
-            # print("backward NFE: %d" % nfe)
+            pred_y_t, nfe = unreg_nodes_odeint(flat_batch_y0_t, batch_t, fargs)
+            print("forward NFE: %d" % nfe)
+
+            # integrate adjoint ODE to count NFE
+            grad_loss = grad_loss_fn(ravel_batch_y_t(pred_y_t)[:, :, :D], batch_y)
+            cotangent = np.concatenate((grad_loss,
+                                        np.zeros((parse_args.batch_time, parse_args.batch_size, 1))),
+                                       axis=2)
+            nfe = unreg_nodes_odeint_vjp(cotangent, flat_batch_y0_t, batch_t, fargs)
+            print("backward NFE: %d" % nfe)
 
             params_grad = np.array(grad_predict((batch_y, flat_batch_y0_t_r0_allr0, batch_t, *fargs))[3:])
             opt_state = opt_update(itr, params_grad, opt_state)
