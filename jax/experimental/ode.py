@@ -299,6 +299,7 @@ def vjp_odeint(ofunc, y0, t, *args, **kwargs):
   """
   rtol = kwargs.get('rtol', 1.4e-8)
   atol = kwargs.get('atol', 1.4e-8)
+  nfe = kwargs.get('nfe', False)
 
   flat_args, unravel_args = ravel_pytree(args)
   flat_func = lambda y, t, flat_args: ofunc(y, t, *unravel_args(flat_args))
@@ -374,7 +375,10 @@ def vjp_odeint(ofunc, y0, t, *args, **kwargs):
     return tuple([result[-5], vjp_times] + list(result[-3]) + [result[-1]])
 
   primals_out, _ = odeint(flat_func, y0, t, flat_args)
-  vjp_fun = lambda g: vjp_all(g, primals_out, t)[:-1]
+  if nfe:
+    vjp_fun = lambda g: vjp_all(g, primals_out, t)
+  else:
+    vjp_fun = lambda g: vjp_all(g, primals_out, t)[:-1]
 
   return primals_out, vjp_fun
 
@@ -434,10 +438,11 @@ def test_nodes_grad():
 
   def nodes_predict(args):
       """
-      Gradient of result of odeint wrt final.
+      Loss function of prediction.
       """
-      ys = ravel_batch_y_t_r_allr(nodes_odeint(*args))
-      return total_loss_fun(ys, true_y)
+      true_ys, odeint_args = args[0], args[1:]
+      ys = ravel_batch_y_t_r_allr(nodes_odeint(*odeint_args))
+      return total_loss_fun(ys, true_ys)
 
   dim = 3
   batch_size = 5
@@ -558,8 +563,8 @@ def test_nodes_grad():
 
   nodes_odeint = build_odeint(reg_dynamics, atol=1e-12, rtol=1e-12)
 
-  numerical_grad = nd(nodes_predict, (flat_batch_y0_t_r0_allr0, t, *fargs))
-  exact_grad, ravel_grad = ravel_pytree(grad(nodes_predict)((flat_batch_y0_t_r0_allr0, t, *fargs)))
+  numerical_grad = nd(nodes_predict, (true_y, flat_batch_y0_t_r0_allr0, t, *fargs))
+  exact_grad, ravel_grad = ravel_pytree(grad(nodes_predict)((true_y, flat_batch_y0_t_r0_allr0, t, *fargs))[1:])
 
   exact_grad = ravel_grad(exact_grad)
   numerical_grad = ravel_grad(numerical_grad)
