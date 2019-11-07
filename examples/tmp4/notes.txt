@@ -1,0 +1,1 @@
+After trying to fix your code, by making sure gradients and odeint are correct, you still run into the same issue when trying to solve x^2.
