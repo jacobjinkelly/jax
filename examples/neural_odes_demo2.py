@@ -28,11 +28,11 @@ parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=2)
 parser.add_argument('--batch_size', type=int, default=50)
-parser.add_argument('--nepochs', type=int, default=1)
+parser.add_argument('--nepochs', type=int, default=100)
 parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
-parser.add_argument('--test_freq', type=int, default=1)
-parser.add_argument('--dirname', type=str, default='tmp4')
+parser.add_argument('--test_freq', type=int, default=10)
+parser.add_argument('--dirname', type=str, default='tmp7')
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -48,7 +48,7 @@ true_y0 = np.repeat(np.expand_dims(np.linspace(-0.5, 0.5, parse_args.data_size),
 #                           np.expand_dims(true_y0[:, 2] ** 4, axis=1)
 #                           ),
 #                          axis=1)
-true_y1 = np.expand_dims(true_y0[:, 0], axis=1)
+true_y1 = np.expand_dims(2 * true_y0[:, 0] + 1, axis=1)
 true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
                         np.expand_dims(true_y1, axis=0)),
                         axis=0)  # (T, N, D)
@@ -95,6 +95,8 @@ def run(reg, lam, key, dirname):
 
     # set up MLP
     init_random_params, predict = stax.serial(
+        Dense(50), Tanh,
+        Dense(50), Tanh,
         Dense(50), Tanh,
         Dense(D)
     )
