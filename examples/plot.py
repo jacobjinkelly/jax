@@ -16,7 +16,7 @@ config.update('jax_enable_x64', True)
 
 key = random.PRNGKey(0)
 
-dirname = "tmp6"
+dirname = "tmp14"
 results_path = "%s/results.txt" % dirname
 
 file = open(results_path, "r")
@@ -421,13 +421,13 @@ def new_dynamics():
     import jax.numpy as np
 
     D = 1
-    start_points = np.linspace(-0.5, 0.5, num=10)
+    start_points = np.linspace(-1, 0, num=10)
     DATA_SIZE = len(start_points)
     TOTAL_TIME_POINTS = 1000
     REGS = ['r0', 'r1']
     NUM_REGS = len(REGS)
 
-    dim_fns = {"2x": lambda x: 2*x,
+    dim_fns = {"x^2 + x": lambda x: x ** 2 + x,
                # "x^3": lambda x: x ** 3,
                # "x^4": lambda x: x ** 4
                }
