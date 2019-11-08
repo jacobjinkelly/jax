@@ -1,0 +1,1 @@
+Fail to learn x^2 + x because increasing and then decreasing function.

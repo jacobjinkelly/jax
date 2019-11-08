@@ -1,0 +1,1 @@
+x^3 on a wide range, our model can learn this! (didn't learn it perfectly since our hyperparams were bad)
