@@ -16,7 +16,7 @@ config.update('jax_enable_x64', True)
 
 key = random.PRNGKey(0)
 
-dirname = "tmp14"
+dirname = "2019-11-09-11-32-31"
 results_path = "%s/results.txt" % dirname
 
 file = open(results_path, "r")
@@ -42,8 +42,6 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
         plot_points[reg]["lam"] = []
         plot_points[reg]["loss"] = []
         plot_points[reg]["all_loss"] = {}
-        plot_points[reg]["all_grad_loss"] = {}
-        plot_points[reg]["all_grad_reg"] = {}
         plot_points[reg]["all_r0"] = {}
         plot_points[reg]["all_r1"] = {}
         plot_points[reg]["r0"] = []
@@ -70,15 +68,11 @@ for ind, next_ind in zip(inds, inds[1:] + [len(lines)]):
     for line in data:
         if line.startswith("Iter"):
             losses.append(float(line.split(" | ")[2].split("Loss ")[-1][:-1]))
-            grad_loss.append(float(line.split(" | ")[3].split("Loss Grad Norm ")[-1][:-1]))
-            grad_reg.append(float(line.split(" | ")[4].split("Reg Grad Norm ")[-1][:-1]))
-            r0.append(float(line.split(" | ")[5].split("r0 ")[-1][:-1]))
-            r1.append(float(line.split(" | ")[6].split("r1 ")[-1][:-1]))
+            r0.append(float(line.split(" | ")[3].split("r0 ")[-1][:-1]))
+            r1.append(float(line.split(" | ")[4].split("r1 ")[-1][:-1]))
         else:
             nfe.append(line)
     plot_points[reg]["all_loss"][lam] = losses
-    plot_points[reg]["all_grad_loss"][lam] = grad_loss
-    plot_points[reg]["all_grad_reg"][lam] = grad_reg
     plot_points[reg]["all_r0"][lam] = r0
     plot_points[reg]["all_r1"][lam] = r1
 
@@ -248,23 +242,6 @@ def comp_grad_norm_plot(yaxis_vals, yaxis_name):
             plt.close(fig)
 
 
-# print some statistics on the gradient norms
-for reg in plot_points:
-    for lam in plot_points[reg]["all_grad_loss"]:
-        loss_grad = np.array(plot_points[reg]["all_grad_loss"][lam])
-        reg_grad = np.array(plot_points[reg]["all_grad_reg"][lam])
-
-        if float(lam) != 0:
-            reg_grad /= lam
-
-        print(reg, lam)
-        print("Loss Grad Norm (Min, Max, Mean): %.3f, %.3f, %.3f," %
-              (np.min(loss_grad), np.max(loss_grad), np.mean(loss_grad)))
-        print("Reg Grad Norm (Min, Max, Mean): %.3f, %.3f, %.3f," %
-              (np.min(reg_grad), np.max(reg_grad), np.mean(reg_grad)))
-        print("Average Ratio: %.3f" % np.mean(loss_grad / reg_grad))
-
-
 # =================================================== PLOT DYNAMICS ===================================================
 
 def dynamics():
@@ -421,13 +398,13 @@ def new_dynamics():
     import jax.numpy as np
 
     D = 1
-    start_points = np.linspace(-1, 0, num=10)
+    start_points = np.linspace(-1.5, 1.5, num=10)
     DATA_SIZE = len(start_points)
     TOTAL_TIME_POINTS = 1000
     REGS = ['r0', 'r1']
     NUM_REGS = len(REGS)
 
-    dim_fns = {"x^2 + x": lambda x: x ** 2 + x,
+    dim_fns = {"x^3": lambda x: x ** 3,
                # "x^3": lambda x: x ** 3,
                # "x^4": lambda x: x ** 4
                }
@@ -508,16 +485,10 @@ def new_dynamics():
         flat_pred_reg = np.reshape(pred_reg, (-1,))
         return flat_pred_reg
 
-    plot_points = {
-        "none": {
-            "lam": [0]
-        }
-    }
-
     for reg in plot_points:
         for lam_rank, lam in enumerate(sorted(plot_points[reg]["lam"])):
             num_epochs = 100
-            iters_per_epoch = 20
+            iters_per_epoch = 1
 
             for itr in range(iters_per_epoch, num_epochs * iters_per_epoch + 1, iters_per_epoch):
 
@@ -577,7 +548,6 @@ if __name__ == "__main__":
     #
     #     pareto_plot_nfe("forward", "Forward NFE", lam_slice)
     #     pareto_plot_nfe("backward", "Backward NFE", lam_slice)
-
 
     new_dynamics()
 
