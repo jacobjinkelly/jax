@@ -27,12 +27,12 @@ parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=2)
-parser.add_argument('--batch_size', type=int, default=500)
-parser.add_argument('--nepochs', type=int, default=100)
+parser.add_argument('--batch_size', type=int, default=200)
+parser.add_argument('--nepochs', type=int, default=1000)
 parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
-parser.add_argument('--dirname', type=str, default='tmp14')
+parser.add_argument('--dirname', type=str, default='tmp15')
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
 parser.add_argument('--adjoint', action='store_true')
@@ -42,13 +42,11 @@ parse_args = parser.parse_args()
 config.update('jax_enable_x64', True)
 
 D = 1
+true_y0_range = 3
+true_fn = lambda x: x ** 3
+# only for evaluating on a fixed test set
 true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, parse_args.data_size), axis=1), D, axis=1)  # (N, D)
-# true_y1 = np.concatenate((np.expand_dims(true_y0[:, 0] ** 2, axis=1),
-#                           np.expand_dims(true_y0[:, 1] ** 3, axis=1),
-#                           np.expand_dims(true_y0[:, 2] ** 4, axis=1)
-#                           ),
-#                          axis=1)
-true_y1 = np.expand_dims(true_y0[:, 0] ** 3, axis=1)
+true_y1 = np.expand_dims(true_fn(true_y0[:, 0]), axis=1)
 true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
                         np.expand_dims(true_y1, axis=0)),
                         axis=0)  # (T, N, D)
@@ -56,22 +54,28 @@ t = np.array([0., 1.])  # (T)
 
 
 @jax.jit
-def get_batch(shuffled_inds, batch):
+def get_batch(key):
     """
     Get batch.
     """
-    s = lax.dynamic_slice(shuffled_inds, [parse_args.batch_size * batch], [parse_args.batch_size])
-    batch_y0 = true_y0[s]       # (M, D)
-    batch_t = t                 # (T)
-    batch_y = true_y[:, s, :]   # (T, M, D)
-    return batch_y0, batch_t, batch_y
+    new_key, subkey = random.split(key)
+    key = new_key
+    batch_y0 = random.uniform(subkey, (parse_args.batch_size, D),
+                              minval=-true_y0_range, maxval=true_y0_range)     # (M, D)
+    batch_y1 = np.expand_dims(true_fn(batch_y0[:, 0]), axis=1)
+    batch_t = t                                                                # (T)
+    batch_y = np.concatenate((np.expand_dims(batch_y0, axis=0),
+                              np.expand_dims(batch_y1, axis=0)),
+                             axis=0)                                           # (T, M, D)
+    return key, batch_y0, batch_t, batch_y
+
 
 @jax.jit
-def pack_batch(shuffled_inds, batch):
+def pack_batch(key):
     """
     Get batch and package it for augmented system integration.
     """
-    batch_y0, batch_t, batch_y = get_batch(shuffled_inds, batch)
+    key, batch_y0, batch_t, batch_y = get_batch(key)
     batch_y0_t = np.concatenate((batch_y0,
                                  np.expand_dims(
                                      np.repeat(batch_t[0], parse_args.batch_size),
@@ -83,7 +87,7 @@ def pack_batch(shuffled_inds, batch):
     allr0 = np.zeros((parse_args.batch_size, NUM_REGS))
     batch_y0_t_r0_allr0 = np.concatenate((batch_y0_t, r0, allr0), axis=1)
     flat_batch_y0_t_r0_allr0 = np.reshape(batch_y0_t_r0_allr0, (-1,))
-    return flat_batch_y0_t, flat_batch_y0_t_r0_allr0, batch_t, batch_y
+    return key, flat_batch_y0_t, flat_batch_y0_t_r0_allr0, batch_t, batch_y
 
 
 def run(reg, lam, key, dirname):
@@ -106,7 +110,7 @@ def run(reg, lam, key, dirname):
 
     flat_params, ravel_params = ravel_pytree(init_params)
 
-    batch_y0, batch_t, batch_y = get_batch(np.arange(parse_args.data_size, dtype=np.int64), 0)
+    key, batch_y0, batch_t, batch_y = get_batch(key)
 
     r0 = np.zeros((parse_args.batch_size, 1))
     allr0 = np.zeros((parse_args.batch_size, NUM_REGS))
@@ -319,14 +323,10 @@ def run(reg, lam, key, dirname):
 
     for epoch in range(parse_args.nepochs):
 
-        new_key, subkey = random.split(key)
-        key = new_key
-        shuffled_inds = random.shuffle(subkey, np.arange(parse_args.data_size, dtype=np.int64))
-
         for batch in range(batch_per_epoch):
             itr = epoch * batch_per_epoch + batch + 1
 
-            flat_batch_y0_t, flat_batch_y0_t_r0_allr0, batch_t, batch_y = pack_batch(shuffled_inds, batch)
+            key, flat_batch_y0_t, flat_batch_y0_t_r0_allr0, batch_t, batch_y = pack_batch(key)
 
             fargs = get_params(opt_state)
 
