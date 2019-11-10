@@ -32,6 +32,7 @@ parser.add_argument('--nepochs', type=int, default=1000)
 parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
+parser.add_argument('--save_freq', type=int, default=100)
 parser.add_argument('--dirname', type=str, default='tmp15')
 parser.add_argument('--viz', action='store_true')
 parser.add_argument('--gpu', type=int, default=0)
@@ -368,10 +369,11 @@ def run(reg, lam, key, dirname):
                       format(itr, total_loss, loss, r0_reg, r1_reg),
                       file=sys.stderr)
 
-        param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, (epoch + 1) * batch_per_epoch)
-        outfile = open(param_filename, "wb")
-        pickle.dump(fargs, outfile)
-        outfile.close()
+            if itr * parse_args.save_freq == 0:
+                param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
+                outfile = open(param_filename, "wb")
+                pickle.dump(fargs, outfile)
+                outfile.close()
 
 
 if __name__ == "__main__":
