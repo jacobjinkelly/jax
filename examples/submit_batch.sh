@@ -9,12 +9,18 @@ results=$(pwd)/$curr_time
 mkdir -p $scripts
 mkdir -p $results
 
-lam_file="lams.txt"
+r0_lam_file="r0_lams.txt"
 
 while IFS= read -r line
 do
     ./submit.sh $scripts $results r0 $line
+done < "$r0_lam_file"
+
+r1_lam_file="r1_lams.txt"
+
+while IFS= read -r line
+do
     ./submit.sh $scripts $results r1 $line
-done < "$lam_file"
+done < "$r1_lam_file"
 
 ./submit.sh $scripts $results none 0
