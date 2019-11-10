@@ -1,0 +1,1 @@
+train x^3 better (larger batch size)
