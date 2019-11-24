@@ -215,7 +215,7 @@ def run(reg, lam, key, dirname):
                                      axis=1)
 
         r0 = np.sum(y ** 2, axis=1) ** 0.5
-        r1 = np.sum(predictions_y ** 2, axis=1) ** 0.5
+        r1 = np.sum(predictions_y ** 2, axis=1)
         if reg == "r0":
             regularization = r0
         elif reg == "r1":
