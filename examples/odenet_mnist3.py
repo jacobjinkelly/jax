@@ -15,7 +15,7 @@ import numpy.random as npr
 
 import jax
 import jax.numpy as np
-from jax.examples import datasets
+from examples import datasets
 from jax import random, grad
 from jax.experimental import optimizers
 from jax.experimental.ode import build_odeint
@@ -23,8 +23,8 @@ from jax.flatten_util import ravel_pytree
 from jax.nn import sigmoid, log_softmax
 from jax.nn.initializers import glorot_normal, normal
 
-REGS = ['r0', 'r1']
-NUM_REGS = len(REGS)
+regs = ['r0', 'r1']
+num_regs = len(regs)
 
 parser = argparse.ArgumentParser('ODE MNIST')
 parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
@@ -35,11 +35,15 @@ parser.add_argument('--nepochs', type=int, default=160)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--mom', type=float, default=0.9)
 parser.add_argument('--lam', type=float, default=0)
-parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
+parser.add_argument('--reg', type=str, choices=['none'] + regs, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
 parser.add_argument('--save_freq', type=int, default=2)
 parser.add_argument('--dirname', type=str, default='tmp16')
 parse_args = parser.parse_args()
+
+img_dim = 784
+ode_dim = 64
+n_classes = 10
 
 
 def run(reg, lam, rng, dirname):
@@ -54,7 +58,7 @@ def run(reg, lam, rng, dirname):
         Dynamics of the ODEBlock.
         """
         params = ravel_ode_params(np.array(flat_params))
-        y_t = np.reshape(flat_y_t, (-1, 65))
+        y_t = np.reshape(flat_y_t, (-1, ode_dim + 1))
         w_dyn, b_dyn = params
         out_y = sigmoid(np.dot(y_t, w_dyn) + np.expand_dims(b_dyn, axis=0))
         out_y_t = np.concatenate((out_y,
@@ -62,7 +66,41 @@ def run(reg, lam, rng, dirname):
                                  axis=1)
         flat_out_y_t = np.reshape(out_y_t, (-1,))
         return flat_out_y_t
-    nodes_odeint = build_odeint(dynamics)
+
+    def reg_dynamics(flat_y_t_r_allr, t, *flat_params):
+        """
+        Dynamics of the ODEBlock.
+        """
+        params = ravel_ode_params(np.array(flat_params))
+
+        y_t_r_allr = np.reshape(flat_y_t_r_allr, (-1, ode_dim + 2 + num_regs))
+        y_t = y_t_r_allr[:, :ode_dim + 1]
+        y = y_t[:, :-1]
+
+        w_dyn, b_dyn = params
+        out_y = sigmoid(np.dot(y_t, w_dyn) + np.expand_dims(b_dyn, axis=0))
+        out_y_t = np.concatenate((out_y,
+                                  np.ones((out_y.shape[0], 1))),
+                                 axis=1)
+
+        r0 = np.sum(y ** 2, axis=1) ** 0.5
+        r1 = np.sum(out_y ** 2, axis=1)
+        if reg == "r0":
+            regularization = r0
+        elif reg == "r1":
+            regularization = r1
+        else:
+            regularization = np.zeros(parse_args.batch_size)
+
+        pred_reg = np.concatenate((out_y_t,
+                                   np.expand_dims(regularization, axis=1),
+                                   np.expand_dims(r0, axis=1),
+                                   np.expand_dims(r1, axis=1)),
+                                  axis=1)
+        flat_pred_reg = np.reshape(pred_reg, (-1,))
+
+        return flat_pred_reg
+    nodes_odeint = build_odeint(reg_dynamics)
 
     def predict(args, x):
         """
@@ -76,18 +114,19 @@ def run(reg, lam, rng, dirname):
 
         out_1 = np.dot(x, w_1) + np.expand_dims(b_1, axis=0)
         in_ode = np.concatenate((out_1,
-                                 np.ones((out_1.shape[0], 1)) * t[1]),
+                                 np.ones((out_1.shape[0], 1)) * t[1],
+                                 np.zeros((out_1.shape[0], num_regs + 1))),
                                 axis=1)
         flat_in_ode = np.reshape(in_ode, (-1,))
         flat_out_ode = nodes_odeint(flat_in_ode, t, *flat_ode_params)[-1]
-        out_t_ode = np.reshape(flat_out_ode, (-1, 65))
-        out_ode = out_t_ode[:, :-1]
+        out_t_r_allr_ode = np.reshape(flat_out_ode, (-1, ode_dim + 2 + num_regs))
+        out_ode = out_t_r_allr_ode[:, :ode_dim]
 
         in_2 = sigmoid(out_ode)
         out_2 = np.dot(in_2, w_2)
         out = log_softmax(out_2)
 
-        return out
+        return out, out_t_r_allr_ode[:, ode_dim + 1]
 
     t = np.array([0., 1.])
 
@@ -106,23 +145,19 @@ def run(reg, lam, rng, dirname):
                 yield train_images[batch_idx], train_labels[batch_idx]
     batches = data_stream()
 
-    @jax.jit
-    def total_loss_fun(pred_y_t_r, target):
+    def total_loss_fun(preds_reg, target):
         """
         Loss function.
         """
-        # TODO: implement, and use this inside loss
-        pred, reg = pred_y_t_r[:, :, :D], pred_y_t_r[:, :, D + 1]
+        pred, reg = preds_reg
         return loss_fun(pred, target) + lam * reg_loss(reg)
 
-    @jax.jit
     def reg_loss(reg):
         """
         Regularization loss function.
         """
         return np.mean(reg)
 
-    @jax.jit
     def loss_fun(preds, targets):
         """
         Mean squared error.
@@ -133,7 +168,7 @@ def run(reg, lam, rng, dirname):
     def loss(params, batch):
         inputs, targets = batch
         preds = predict(params, inputs)
-        return loss_fun(preds, targets)
+        return total_loss_fun(preds, targets)
 
     opt_init, opt_update, get_params = optimizers.momentum(parse_args.lr, mass=parse_args.mom)
 
@@ -155,21 +190,21 @@ def run(reg, lam, rng, dirname):
     # initialize the parameters
     rng, layer_rng = random.split(rng)
     k1, k2 = random.split(layer_rng)
-    w_1, b_1 = glorot_normal()(k1, (784, 64)), normal()(k2, (64,))
+    w_1, b_1 = glorot_normal()(k1, (img_dim, ode_dim)), normal()(k2, (ode_dim,))
 
     rng, layer_rng = random.split(rng)
     k1, k2 = random.split(layer_rng)
-    w_dyn, b_dyn = glorot_normal()(k1, (65, 64)), normal()(k2, (64,))
+    w_dyn, b_dyn = glorot_normal()(k1, (ode_dim + 1, ode_dim)), normal()(k2, (ode_dim,))
 
     rng, layer_rng = random.split(rng)
     k1, k2 = random.split(layer_rng)
-    w_2 = glorot_normal()(k1, (64, 10))
+    w_2 = glorot_normal()(k1, (ode_dim, n_classes))
 
     flat_ode_params, ravel_ode_params = ravel_pytree((w_dyn, b_dyn))
     init_params = [(w_1, b_1), flat_ode_params, (w_2,)]
 
+    # train
     flat_params, ravel_params = ravel_pytree(init_params)
-
     opt_state = opt_init(flat_params)
     itercount = itertools.count()
 
