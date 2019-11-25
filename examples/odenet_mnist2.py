@@ -16,7 +16,7 @@ import numpy.random as npr
 
 import jax
 import jax.numpy as np
-from examples import datasets
+from jax.examples import datasets
 from jax import random, grad
 from jax.flatten_util import ravel_pytree
 from jax.experimental import stax, optimizers
@@ -105,7 +105,8 @@ def run(reg, lam, key, dirname):
                         flat_ode_params,
                         init_params[3],
                         init_params[4],
-                        init_params[5]]
+                        init_params[5]
+    ]
 
     t = np.array([0., 1.])
 
@@ -169,8 +170,6 @@ def run(reg, lam, key, dirname):
         target_class = np.argmax(targets, axis=1)
         predicted_class = np.argmax(predict(params, inputs), axis=1)
         return np.mean(predicted_class == target_class)
-
-    losses = loss(flat_init_params, next(batches))
 
     opt_state = opt_init(flat_init_params)
     itercount = itertools.count()

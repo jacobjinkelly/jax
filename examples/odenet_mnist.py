@@ -1,5 +1,5 @@
 """
-Neural ODEs in Jax.
+Neural ODEs on MNIST.
 """
 
 from __future__ import absolute_import
@@ -18,6 +18,7 @@ import jax
 import jax.numpy as np
 from jax.examples import datasets
 from jax import random, grad
+from jax.flatten_util import ravel_pytree
 from jax.experimental import stax, optimizers
 from jax.experimental.ode import odeint, build_odeint, vjp_odeint
 from jax.experimental.stax import GeneralConv, Conv, Dense, Identity, AvgPool, Flatten, FanInConcat, Relu, LogSoftmax
@@ -92,13 +93,14 @@ def run(reg, lam, key, dirname):
         Conv(64, (3, 3), padding=((1, 1), (1, 1)))
     )
 
-    def dynamics(y_t, t, *args):
+    def dynamics(y_t, t, *flat_params):
         """
         Dynamics of the ODEBlock.
         """
+        params = ravel_ode_params(np.array(flat_params))
         flat_y, t = y_t[:-1], y_t[-1:]
         y = np.reshape(flat_y, (-1, 6, 6, 64))
-        out_y = odefunc_predict(args, (y, t))
+        out_y = odefunc_predict(params, (y, t))
         flat_out_y = np.reshape(out_y, (-1,))
         return np.concatenate((flat_out_y, np.ones((1,))))
     nodes_odeint = build_odeint(dynamics)
@@ -131,6 +133,17 @@ def run(reg, lam, key, dirname):
     )
 
     _, init_params = init_random_params(key, (28, 28, 1, -1))
+
+    flat_ode_params, ravel_ode_params = ravel_pytree(init_params[5])
+
+    flat_init_params = [
+        init_params[0], init_params[1],
+        init_params[2], init_params[3],
+        init_params[4],
+        flat_ode_params, init_params[6],
+        init_params[7], init_params[8],
+        init_params[9], init_params[10]
+    ]
 
     t = np.array([0., 1.])
 
@@ -197,7 +210,7 @@ def run(reg, lam, key, dirname):
         predicted_class = np.argmax(predict(params, inputs), axis=1)
         return np.mean(predicted_class == target_class)
 
-    opt_state = opt_init(init_params)
+    opt_state = opt_init(flat_init_params)
     itercount = itertools.count()
 
     for epoch in range(parse_args.nepochs):
