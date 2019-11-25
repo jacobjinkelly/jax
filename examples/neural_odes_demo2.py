@@ -27,7 +27,7 @@ parser = argparse.ArgumentParser('ODE demo')
 parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--data_size', type=int, default=1000)
 parser.add_argument('--batch_time', type=int, default=2)
-parser.add_argument('--batch_size', type=int, default=200)
+parser.add_argument('--batch_size', type=int, default=128)
 parser.add_argument('--nepochs', type=int, default=1000)
 parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + REGS, default='none')
@@ -42,12 +42,12 @@ parse_args = parser.parse_args()
 
 config.update('jax_enable_x64', True)
 
-D = 1
+D = 64
 true_y0_range = 3
 true_fn = lambda x: x ** 3
 # only for evaluating on a fixed test set
 true_y0 = np.repeat(np.expand_dims(np.linspace(-3, 3, parse_args.data_size), axis=1), D, axis=1)  # (N, D)
-true_y1 = np.expand_dims(true_fn(true_y0[:, 0]), axis=1)
+true_y1 = np.repeat(np.expand_dims(true_fn(true_y0[:, 0]), axis=1), D, axis=1)
 true_y = np.concatenate((np.expand_dims(true_y0, axis=0),
                         np.expand_dims(true_y1, axis=0)),
                         axis=0)  # (T, N, D)
@@ -62,8 +62,8 @@ def get_batch(key):
     new_key, subkey = random.split(key)
     key = new_key
     batch_y0 = random.uniform(subkey, (parse_args.batch_size, D),
-                              minval=-true_y0_range, maxval=true_y0_range)     # (M, D)
-    batch_y1 = np.expand_dims(true_fn(batch_y0[:, 0]), axis=1)
+                              minval=-true_y0_range, maxval=true_y0_range)              # (M, D)
+    batch_y1 = np.repeat(np.expand_dims(true_fn(batch_y0[:, 0]), axis=1), D, axis=1)    # (M, D)
     batch_t = t                                                                # (T)
     batch_y = np.concatenate((np.expand_dims(batch_y0, axis=0),
                               np.expand_dims(batch_y1, axis=0)),
