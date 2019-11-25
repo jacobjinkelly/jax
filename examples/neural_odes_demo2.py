@@ -270,11 +270,11 @@ def run(reg, lam, key, dirname):
         return flat_pred_reg
 
     @jax.jit
-    def total_loss_fun(pred_y_t_r, target):
+    def total_loss_fun(pred_y_t_r_allr, target):
         """
         Loss function.
         """
-        pred, reg = pred_y_t_r[:, :, :D], pred_y_t_r[:, :, D + 1]
+        pred, reg = pred_y_t_r_allr[:, :, :D], pred_y_t_r_allr[:, :, D + 1]
         return loss_fun(pred, target) + lam * reg_loss(reg)
 
     @jax.jit
