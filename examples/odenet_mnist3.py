@@ -15,10 +15,10 @@ import numpy.random as npr
 
 import jax
 import jax.numpy as np
-from examples import datasets
+from jax.examples import datasets
 from jax import random, grad
 from jax.experimental import optimizers
-from jax.experimental.ode import build_odeint
+from jax.experimental.ode import build_odeint, odeint, vjp_odeint
 from jax.flatten_util import ravel_pytree
 from jax.nn import sigmoid, log_softmax
 from jax.nn.initializers import glorot_normal, normal
@@ -102,17 +102,28 @@ def run(reg, lam, rng, dirname):
         return flat_pred_reg
     nodes_odeint = build_odeint(reg_dynamics)
 
+    def mlp_1(args, x):
+        w_1, b_1 = args
+        out_1 = np.dot(x, w_1) + np.expand_dims(b_1, axis=0)
+        return out_1
+
+    def mlp_2(args, out_ode):
+        w_2, = args
+        in_2 = sigmoid(out_ode)
+        out_2 = np.dot(in_2, w_2)
+        out = log_softmax(out_2)
+        return out
+
     def predict(args, x):
         """
         The prediction function for our neural net.
         """
         params = ravel_params(args)
-        w_1, b_1 = params[0]
-        w_2, = params[2]
 
         flat_ode_params = params[1]
 
-        out_1 = np.dot(x, w_1) + np.expand_dims(b_1, axis=0)
+        out_1 = mlp_1(params[0], x)
+
         in_ode = np.concatenate((out_1,
                                  np.ones((out_1.shape[0], 1)) * t[1],
                                  np.zeros((out_1.shape[0], num_regs + 1))),
@@ -122,9 +133,7 @@ def run(reg, lam, rng, dirname):
         out_t_r_allr_ode = np.reshape(flat_out_ode, (-1, ode_dim + 2 + num_regs))
         out_ode = out_t_r_allr_ode[:, :ode_dim]
 
-        in_2 = sigmoid(out_ode)
-        out_2 = np.dot(in_2, w_2)
-        out = log_softmax(out_2)
+        out = mlp_2(params[2], out_ode)
 
         return out, out_t_r_allr_ode[:, ode_dim + 1]
 
@@ -170,6 +179,12 @@ def run(reg, lam, rng, dirname):
         preds = predict(params, inputs)
         return total_loss_fun(preds, targets)
 
+    @jax.jit
+    def partial_loss(args, out_ode, targets):
+        preds = mlp_2(args, out_ode)
+        return total_loss_fun(preds, targets)
+    grad_partial_loss = grad(partial_loss)
+
     opt_init, opt_update, get_params = optimizers.momentum(parse_args.lr, mass=parse_args.mom)
 
     @jax.jit
@@ -208,10 +223,49 @@ def run(reg, lam, rng, dirname):
     opt_state = opt_init(flat_params)
     itercount = itertools.count()
 
+    # unregularized system for counting NFE
+    unreg_nodes_odeint = jax.jit(lambda y0, t, args: odeint(dynamics, y0, t, *args))
+    unreg_nodes_odeint_vjp = jax.jit(lambda cotangent, y0, t, args:
+                                     vjp_odeint(dynamics, y0, t, *args, nfe=True)[1](np.reshape(cotangent,
+                                                                                                (parse_args.batch_time,
+                                                                                                 parse_args.batch_size *
+                                                                                                 (ode_dim + 1))))[-1])
+
+    @jax.jit
+    def count_nfe(opt_state, batch):
+        """
+        Count NFE.
+        """
+        inputs, targets = batch
+        params = ravel_params(get_params(opt_state))
+        out_1 = mlp_1(params[0], inputs)
+
+        in_ode = np.concatenate((out_1,
+                                 np.ones((out_1.shape[0], 1)) * t[1]),
+                                axis=1)
+        flat_in_ode = np.reshape(in_ode, (-1,))
+        flat_out_ode, f_nfe = unreg_nodes_odeint(flat_in_ode, t, flat_ode_params)[-1]
+        out_t_r_allr_ode = np.reshape(flat_out_ode, (-1, ode_dim + 2 + num_regs))
+        out_ode = out_t_r_allr_ode[:, :ode_dim]
+
+        grad_partial_loss_ = grad_partial_loss(params[2], out_ode, targets)
+        cotangent = np.concatenate((grad_partial_loss_,
+                                    np.zeros((parse_args.batch_time, parse_args.batch_size, 1))),
+                                   axis=2)
+        b_nfe = unreg_nodes_odeint_vjp(cotangent, in_ode, t, flat_ode_params)
+
+        return f_nfe, b_nfe
+
     for epoch in range(parse_args.nepochs):
         for i in range(num_batches):
-            print(i)
-            opt_state = update(next(itercount), opt_state, next(batches))
+            batch = next(batches)
+
+            f_nfe, b_nfe = count_nfe(opt_state, batch)
+
+            print("forward NFE: %d" % f_nfe)
+            print("backward NFE: %d" % b_nfe)
+
+            opt_state = update(next(itercount), opt_state, batch)
 
         if epoch % parse_args.test_freq == 0:
             params = get_params(opt_state)
