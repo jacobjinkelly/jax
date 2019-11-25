@@ -9,6 +9,7 @@ from __future__ import print_function
 import argparse
 import itertools
 import os
+import pickle
 import sys
 
 import numpy.random as npr
@@ -30,14 +31,13 @@ parser = argparse.ArgumentParser('ODE MNIST')
 parser.add_argument('--method', type=str, choices=['dopri5'], default='dopri5')
 parser.add_argument('--batch_time', type=int, default=2)
 parser.add_argument('--batch_size', type=int, default=128)
-parser.add_argument('--test_batch_size', type=int, default=1000)
 parser.add_argument('--nepochs', type=int, default=160)
 parser.add_argument('--lr', type=float, default=1e-3)
 parser.add_argument('--mom', type=float, default=0.9)
 parser.add_argument('--lam', type=float, default=0)
 parser.add_argument('--reg', type=str, choices=['none'] + regs, default='none')
 parser.add_argument('--test_freq', type=int, default=1)
-parser.add_argument('--save_freq', type=int, default=2)
+parser.add_argument('--save_freq', type=int, default=500)
 parser.add_argument('--dirname', type=str, default='tmp16')
 parse_args = parser.parse_args()
 
@@ -90,7 +90,7 @@ def run(reg, lam, rng, dirname):
         elif reg == "r1":
             regularization = r1
         else:
-            regularization = np.zeros(parse_args.batch_size)
+            regularization = np.zeros(out_y.shape[0])
 
         pred_reg = np.concatenate((out_y_t,
                                    np.expand_dims(regularization, axis=1),
@@ -135,7 +135,7 @@ def run(reg, lam, rng, dirname):
 
         out = mlp_2(params[2], out_ode)
 
-        return out, out_t_r_allr_ode[:, ode_dim + 1]
+        return out, out_t_r_allr_ode[:, ode_dim + 1], out_t_r_allr_ode[:, ode_dim + 2:]
 
     t = np.array([0., 1.])
 
@@ -154,19 +154,37 @@ def run(reg, lam, rng, dirname):
                 yield train_images[batch_idx], train_labels[batch_idx]
     batches = data_stream()
 
+    @jax.jit
+    def sep_loss_fun(opt_state, batch):
+        """
+        Return total loss and loss
+        """
+        params = get_params(opt_state)
+        inputs, targets = batch
+        preds = predict(params, inputs)
+        pred, reg, allregs = preds
+        loss_ = loss_fun(pred, targets)
+        reg_ = lam * reg_loss(reg)
+        r0_reg = reg_loss(allregs[:, 0])
+        r1_reg = reg_loss(allregs[:, 1])
+        return loss_ + reg_, loss_, r0_reg, r1_reg
+
+    @jax.jit
     def total_loss_fun(preds_reg, target):
         """
         Loss function.
         """
-        pred, reg = preds_reg
+        pred, reg, _ = preds_reg
         return loss_fun(pred, target) + lam * reg_loss(reg)
 
+    @jax.jit
     def reg_loss(reg):
         """
         Regularization loss function.
         """
         return np.mean(reg)
 
+    @jax.jit
     def loss_fun(preds, targets):
         """
         Mean squared error.
@@ -180,9 +198,9 @@ def run(reg, lam, rng, dirname):
         return total_loss_fun(preds, targets)
 
     @jax.jit
-    def partial_loss(args, out_ode, targets):
+    def partial_loss(out_ode, targets, args):
         preds = mlp_2(args, out_ode)
-        return total_loss_fun(preds, targets)
+        return loss_fun(preds, targets)
     grad_partial_loss = grad(partial_loss)
 
     opt_init, opt_update, get_params = optimizers.momentum(parse_args.lr, mass=parse_args.mom)
@@ -244,34 +262,49 @@ def run(reg, lam, rng, dirname):
                                  np.ones((out_1.shape[0], 1)) * t[1]),
                                 axis=1)
         flat_in_ode = np.reshape(in_ode, (-1,))
-        flat_out_ode, f_nfe = unreg_nodes_odeint(flat_in_ode, t, flat_ode_params)[-1]
-        out_t_r_allr_ode = np.reshape(flat_out_ode, (-1, ode_dim + 2 + num_regs))
-        out_ode = out_t_r_allr_ode[:, :ode_dim]
+        flat_out_ode, f_nfe = unreg_nodes_odeint(flat_in_ode, t, flat_ode_params)
+        out_t_ode = np.reshape(flat_out_ode[-1:], (-1, ode_dim + 1))
+        out_ode = out_t_ode[:, :ode_dim]
 
-        grad_partial_loss_ = grad_partial_loss(params[2], out_ode, targets)
-        cotangent = np.concatenate((grad_partial_loss_,
+        grad_partial_loss_ = grad_partial_loss(out_ode, targets, params[2])
+        full_grad_partial_loss = np.concatenate((np.zeros((1, parse_args.batch_size, ode_dim)),
+                                                 np.expand_dims(grad_partial_loss_, axis=0)),
+                                                axis=0)
+        cotangent = np.concatenate((full_grad_partial_loss,
                                     np.zeros((parse_args.batch_time, parse_args.batch_size, 1))),
                                    axis=2)
-        b_nfe = unreg_nodes_odeint_vjp(cotangent, in_ode, t, flat_ode_params)
+        b_nfe = unreg_nodes_odeint_vjp(cotangent, np.reshape(in_ode, (-1, )), t, flat_ode_params)
 
         return f_nfe, b_nfe
 
     for epoch in range(parse_args.nepochs):
         for i in range(num_batches):
             batch = next(batches)
+            itr = next(itercount)
 
-            f_nfe, b_nfe = count_nfe(opt_state, batch)
+            # f_nfe, b_nfe = count_nfe(opt_state, batch)
 
-            print("forward NFE: %d" % f_nfe)
-            print("backward NFE: %d" % b_nfe)
+            # print("forward NFE: %d" % f_nfe)
+            # print("backward NFE: %d" % b_nfe)
 
-            opt_state = update(next(itercount), opt_state, batch)
+            # opt_state = update(itr, opt_state, batch)
 
-        if epoch % parse_args.test_freq == 0:
-            params = get_params(opt_state)
-            train_acc = accuracy(params, (train_images, train_labels))
-            test_acc = accuracy(params, (test_images, test_labels))
-            print("Epoch {} | Train Acc. {} | Test Acc {}".format(epoch, train_acc, test_acc))
+            if itr % parse_args.test_freq == 0:
+
+                total_loss, loss, r0_reg, r1_reg = sep_loss_fun(opt_state, (train_images, train_labels))
+
+                print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | r0 {:.6f} | r1 {:.6f}'.
+                      format(itr, total_loss, loss, r0_reg, r1_reg))
+                print('Iter {:04d} | Total (Regularized) Loss {:.6f} | Loss {:.6f} | r0 {:.6f} | r1 {:.6f}'.
+                      format(itr, total_loss, loss, r0_reg, r1_reg),
+                      file=sys.stderr)
+
+            if itr % parse_args.save_freq == 0:
+                param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
+                fargs = get_params(opt_state)
+                outfile = open(param_filename, "wb")
+                pickle.dump(fargs, outfile)
+                outfile.close()
 
 
 if __name__ == "__main__":
