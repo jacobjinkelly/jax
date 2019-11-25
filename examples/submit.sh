@@ -2,12 +2,11 @@
 
 file=$1
 node=$2
-scripts=$3
-results=$4
-reg=$5
-lam=$6
-
-mem=16G
+mem=$3
+scripts=$4
+results=$5
+reg=$6
+lam=$7
 
 if [ $node = "gpu" ]; then
     command="sbatch -p p100 --mem=$mem --gres=gpu:1"

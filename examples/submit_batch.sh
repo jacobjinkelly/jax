@@ -2,6 +2,7 @@
 
 file=$1
 node=$2
+mem=$3
 
 # activate environment
 . ../../jax_nodes.env
@@ -12,7 +13,7 @@ results=$(pwd)/$curr_time
 mkdir -p $scripts
 mkdir -p $results
 
-args="$file $node $scripts $results"
+args="$file $node $mem $scripts $results"
 
 r0_lam_file="r0_lams.txt"
 
