@@ -1,5 +1,8 @@
 #!/bin/bash
 
+file=$1
+node=$2
+
 # activate environment
 . ../../jax_nodes.env
 
@@ -9,18 +12,20 @@ results=$(pwd)/$curr_time
 mkdir -p $scripts
 mkdir -p $results
 
+args="$file $node $scripts $results"
+
 r0_lam_file="r0_lams.txt"
 
 while IFS= read -r line
 do
-    ./submit.sh $scripts $results r0 $line
+    ./submit.sh $args r0 $line
 done < "$r0_lam_file"
 
 r1_lam_file="r1_lams.txt"
 
 while IFS= read -r line
 do
-    ./submit.sh $scripts $results r1 $line
+    ./submit.sh $args $r1 $line
 done < "$r1_lam_file"
 
-./submit.sh $scripts $results none 0
+./submit.sh $args none 0
