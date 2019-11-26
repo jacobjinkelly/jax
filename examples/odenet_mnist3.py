@@ -282,12 +282,12 @@ def run(reg, lam, rng, dirname):
             batch = next(batches)
             itr = next(itercount)
 
-            # f_nfe, b_nfe = count_nfe(opt_state, batch)
+            f_nfe, b_nfe = count_nfe(opt_state, batch)
 
-            # print("forward NFE: %d" % f_nfe)
-            # print("backward NFE: %d" % b_nfe)
+            print("forward NFE: %d" % f_nfe)
+            print("backward NFE: %d" % b_nfe)
 
-            # opt_state = update(itr, opt_state, batch)
+            opt_state = update(itr, opt_state, batch)
 
             if itr % parse_args.test_freq == 0:
 
