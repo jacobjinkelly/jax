@@ -5,7 +5,7 @@ node=$2
 mem=$3
 
 # activate environment
-. ../../jax_nodes.env
+. /h/jkelly/jax_nodes.env
 
 # set up directory to store results
 curr_time=$(date "+%F-%H-%M-%S")
