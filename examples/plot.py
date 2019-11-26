@@ -16,7 +16,7 @@ config.update('jax_enable_x64', True)
 
 key = random.PRNGKey(0)
 
-dirname = "2019-11-10-10-09-13"
+dirname = "2019-11-21-12-06-39"
 results_path = "%s/results.txt" % dirname
 
 file = open(results_path, "r")
@@ -331,11 +331,8 @@ def dynamics(lam_slice):
 
                         x, y = total_t, pred_y[:, data_point, i]
                         y0 = start_points[data_point]
-                        y1 = y[-1]
-                        t1 = dim_fns[fn_name](y0)
-                        ax.plot(x, y, label="%.2f |-> %.2f (%.2f)" % (y0, y1, t1))
+                        ax.plot(x, y)
 
-                    plt.legend()
                     plt.title("Reg: %s, Fn: %s, Lam: %.4e" % (reg, fn_name, lam))
                     plt.xlabel("Time")
                     plt.ylabel("state")
@@ -348,50 +345,182 @@ def dynamics(lam_slice):
                 param_file.close()
 
 
+def function(lam_slice):
+    """
+    Plot the learned function regressing y = x^3.
+    """
+
+    import jax
+    import jax.numpy as np
+
+    D = 1
+    start_points = np.linspace(-3, 3, num=1000)
+    DATA_SIZE = len(start_points)
+    TOTAL_TIME_POINTS = 2
+    REGS = ['r0', 'r1']
+    NUM_REGS = len(REGS)
+
+    dim_fns = {"x^3": lambda x: x ** 3}
+
+    true_y0 = np.repeat(np.expand_dims(start_points, axis=1), D, axis=1)    # (DATA_SIZE, D)
+    # TODO: only for 1dim
+    true_y1 = dim_fns["x^3"](true_y0)                                         # (DATA_SIZE, D)
+    total_t = np.linspace(0., 1., num=TOTAL_TIME_POINTS)  # (TOTAL_TIME_POINTS, )
+
+    r = np.zeros((TOTAL_TIME_POINTS, DATA_SIZE, 1))
+    allr = np.zeros((TOTAL_TIME_POINTS, DATA_SIZE, NUM_REGS))
+    true_y_t_r_allr = np.concatenate((np.repeat(np.expand_dims(true_y0, axis=0), TOTAL_TIME_POINTS, axis=0),
+                                      np.expand_dims(
+                                          np.tile(total_t, (DATA_SIZE, 1)).T,
+                                          axis=2),
+                                      r,
+                                      allr),
+                                     axis=2)
+
+    # parse_args.batch_time * parse_args.data_size * (D + 2 + NUM_REGS) |->
+    #                                       (parse_args.batch_time, parse_args.data_size, D + 2 + NUM_REGS)
+    _, ravel_true_y_t_r_allr = ravel_pytree(true_y_t_r_allr)
+
+    # set up input
+    r0 = np.zeros((DATA_SIZE, 1))
+    allr = np.zeros((DATA_SIZE, NUM_REGS))
+    true_y0_t_r0_allr = np.concatenate((true_y0,
+                                        np.expand_dims(
+                                            np.repeat(total_t[0], DATA_SIZE), axis=1),
+                                        r0,
+                                        allr), axis=1)
+
+    # parse_args.data_size * (D + 2 + NUM_REGS) |-> (parse_args.data_size, D + 2 + NUM_REGS)
+    flat_true_y0_t_r0_allr, ravel_true_y0_t_r0_allr = ravel_pytree(true_y0_t_r0_allr)
+
+    # set up MLP
+    init_random_params, predict = stax.serial(
+        Dense(50), Tanh,
+        Dense(D)
+    )
+
+    _, init_params = init_random_params(key, (-1, D + 1))
+    _, ravel_params = ravel_pytree(init_params)
+
+    @jax.jit
+    def test_reg_dynamics(y_t_r_allr, t, *args):
+        """
+        Augmented dynamics to implement regularization. (on test)
+        """
+
+        flat_params = args
+        params = ravel_params(np.array(flat_params))
+
+        # separate out state from augmented
+        # only difference between this and reg_dynamics is
+        # ravelling over datasize instead of batch size
+        y_t_r_allr = ravel_true_y0_t_r0_allr(y_t_r_allr)
+        y_t = y_t_r_allr[:, :D + 1]
+        y = y_t[:, :-1]
+
+        predictions_y = predict(params, y_t)
+        predictions = np.concatenate((predictions_y,
+                                      np.ones((DATA_SIZE, 1))),
+                                     axis=1)
+
+        r0 = np.sum(y ** 2, axis=1) ** 0.5
+        r1 = np.sum(predictions_y ** 2, axis=1) ** 0.5
+        if reg == "r0":
+            regularization = r0
+        elif reg == "r1":
+            regularization = r1
+        else:
+            regularization = np.zeros(DATA_SIZE)
+
+        pred_reg = np.concatenate((predictions,
+                                   np.expand_dims(regularization, axis=1),
+                                   np.expand_dims(r0, axis=1),
+                                   np.expand_dims(r1, axis=1)),
+                                  axis=1)
+        flat_pred_reg = np.reshape(pred_reg, (-1,))
+        return flat_pred_reg
+
+    for reg in plot_points:
+        for lam_rank, lam in enumerate(sorted(plot_points[reg]["lam"][lam_slice[reg]])):
+            num_epochs = 5
+            iters_per_epoch = 1000
+
+            for itr in range(iters_per_epoch, num_epochs * iters_per_epoch + 1, iters_per_epoch):
+
+                # load params
+                param_filename = "%s/reg_%s_lam_%.4e_%d_fargs.pickle" % (dirname, reg, lam, itr)
+                param_file = open(param_filename, "rb")
+                params = pickle.load(param_file)
+                fargs = params
+
+                pred_y = ravel_true_y_t_r_allr(
+                    odeint(test_reg_dynamics, flat_true_y0_t_r0_allr, total_t, *fargs)[0])[:, :, :D]
+
+                for i, fn_name in enumerate(dim_fns):
+
+                    fig, ax = plt.subplots()
+
+                    ax.plot(true_y0, pred_y[-1, :, i], label="ODENet")
+                    ax.plot(true_y0, true_y1, label="y=x^3")
+                    plt.legend()
+                    plt.title("Reg: %s, Fn: %s, Lam: %.4e" % (reg, fn_name, lam))
+                    plt.xlabel("x")
+                    plt.ylabel("y")
+                    figname = "{}/func_reg_{}_fn_{}_lam_rank_{:02d}_lam_{:4e}_{:04d}.png" \
+                        .format(dirname, reg, fn_name, lam_rank, lam, itr)
+                    plt.savefig(figname)
+                    plt.clf()
+                    plt.close(fig)
+
+                param_file.close()
+
+
 if __name__ == "__main__":
-    # starts = [0, 5, 10, 15, 20]
-    # for start in starts:
-    #     if start == 0:
-    #         start = None
-    #     lam_slice = slice(start, None, None)
-    #
-    #     pareto_plot_reg("r0", "r0", lam_slice)
-    #     pareto_plot_reg("r1", "r1", lam_slice)
-    #
-    #     pareto_plot_nfe("forward", "Forward NFE", lam_slice)
-    #     pareto_plot_nfe("backward", "Backward NFE", lam_slice)
-    #
-    # ends = [5, 10, 15, 20, 25]
-    # for end in ends:
-    #     lam_slice = slice(None, end, None)
-    #
-    #     pareto_plot_reg("r0", "r0", lam_slice)
-    #     pareto_plot_reg("r1", "r1", lam_slice)
-    #
-    #     pareto_plot_nfe("forward", "Forward NFE", lam_slice)
-    #     pareto_plot_nfe("backward", "Backward NFE", lam_slice)
-    #
+    starts = [0, 5, 10, 15, 20]
+    for start in starts:
+        if start == 0:
+            start = None
+        lam_slice = slice(start, None, None)
+
+        pareto_plot_reg("r0", "r0", lam_slice)
+        pareto_plot_reg("r1", "r1", lam_slice)
+
+        pareto_plot_nfe("forward", "Forward NFE", lam_slice)
+        pareto_plot_nfe("backward", "Backward NFE", lam_slice)
+
+    ends = [5, 10, 15, 20, 25]
+    for end in ends:
+        lam_slice = slice(None, end, None)
+
+        pareto_plot_reg("r0", "r0", lam_slice)
+        pareto_plot_reg("r1", "r1", lam_slice)
+
+        pareto_plot_nfe("forward", "Forward NFE", lam_slice)
+        pareto_plot_nfe("backward", "Backward NFE", lam_slice)
+
     dyn_lam_slice = {
         "none": slice(None, None, None),
-        "r0": slice(15, 20, None),
-        "r1": slice(15, 20, None)
+        "r0": slice(None, None, None),
+        "r1": slice(None, None, None)
     }
 
+    function(dyn_lam_slice)
+
     dynamics(dyn_lam_slice)
-    #
-    # lams_slices = [slice(None, 5, None), slice(15, 20, None)]
-    # for lam_slice in lams_slices:
-    #     lam_slice = {
-    #         "none": slice(None, None, None),
-    #         "r0": lam_slice,
-    #         "r1": lam_slice
-    #     }
-    #
-    #     train_plot("all_forward", "Forward NFE", lam_slice)
-    #     train_plot("all_backward", "Backward NFE", lam_slice)
-    #     train_plot("all_loss", "Loss", lam_slice)
-    #     train_plot("all_r0", "r0", lam_slice)
-    #     train_plot("all_r1", "r1", lam_slice)
-    #
-    #     comp_train_plot("all_r0", "r0", lam_slice)
-    #     comp_train_plot("all_r1", "r1", lam_slice)
+
+    lams_slices = [slice(None, None, None)]
+    for lam_slice in lams_slices:
+        lam_slice = {
+            "none": slice(None, None, None),
+            "r0": lam_slice,
+            "r1": lam_slice
+        }
+
+        train_plot("all_forward", "Forward NFE", lam_slice)
+        train_plot("all_backward", "Backward NFE", lam_slice)
+        train_plot("all_loss", "Loss", lam_slice)
+        train_plot("all_r0", "r0", lam_slice)
+        train_plot("all_r1", "r1", lam_slice)
+
+        comp_train_plot("all_r0", "r0", lam_slice)
+        comp_train_plot("all_r1", "r1", lam_slice)
