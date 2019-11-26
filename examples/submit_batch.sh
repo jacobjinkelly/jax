@@ -23,7 +23,7 @@ r1_lam_file="r1_lams.txt"
 cp $file $results
 cp $r0_lam_file $results
 cp $r1_lam_file $results
-cat $args > $results/args.txt
+echo $args > $results/args.txt
 
 while IFS= read -r line
 do
