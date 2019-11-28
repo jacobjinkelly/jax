@@ -244,10 +244,9 @@ def run(reg, lam, rng, dirname):
     # unregularized system for counting NFE
     unreg_nodes_odeint = jax.jit(lambda y0, t, args: odeint(dynamics, y0, t, *args))
     unreg_nodes_odeint_vjp = jax.jit(lambda cotangent, y0, t, args:
-                                     vjp_odeint(dynamics, y0, t, *args, nfe=True)[1](np.reshape(cotangent,
-                                                                                                (parse_args.batch_time,
-                                                                                                 parse_args.batch_size *
-                                                                                                 (ode_dim + 1))))[-1])
+                                     vjp_odeint(dynamics, y0, t, *args, nfe=True)[1]
+                                     (np.reshape(cotangent,
+                                                 (parse_args.batch_time, cotangent.size // parse_args.batch_time)))[-1])
 
     @jax.jit
     def count_nfe(opt_state, batch):
@@ -267,11 +266,11 @@ def run(reg, lam, rng, dirname):
         out_ode = out_t_ode[:, :ode_dim]
 
         grad_partial_loss_ = grad_partial_loss(out_ode, targets, params[2])
-        full_grad_partial_loss = np.concatenate((np.zeros((1, parse_args.batch_size, ode_dim)),
+        full_grad_partial_loss = np.concatenate((np.zeros((1, out_ode.shape[0], ode_dim)),
                                                  np.expand_dims(grad_partial_loss_, axis=0)),
                                                 axis=0)
         cotangent = np.concatenate((full_grad_partial_loss,
-                                    np.zeros((parse_args.batch_time, parse_args.batch_size, 1))),
+                                    np.zeros((parse_args.batch_time, out_ode.shape[0], 1))),
                                    axis=2)
         b_nfe = unreg_nodes_odeint_vjp(cotangent, np.reshape(in_ode, (-1, )), t, flat_ode_params)
 
