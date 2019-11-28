@@ -256,6 +256,7 @@ def run(reg, lam, rng, dirname):
         """
         inputs, targets = batch
         params = ravel_params(get_params(opt_state))
+        flat_ode_params = params[1]
         out_1 = mlp_1(params[0], inputs)
 
         in_ode = np.concatenate((out_1,
@@ -276,9 +277,6 @@ def run(reg, lam, rng, dirname):
         b_nfe = unreg_nodes_odeint_vjp(cotangent, np.reshape(in_ode, (-1, )), t, flat_ode_params)
 
         return f_nfe, b_nfe
-
-    for _ in range(468):
-        next(batches)
 
     for epoch in range(parse_args.nepochs):
         for i in range(num_batches):
