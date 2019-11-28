@@ -42,7 +42,7 @@ parser.add_argument('--dirname', type=str, default='tmp16')
 parse_args = parser.parse_args()
 
 img_dim = 784
-ode_dim = 64
+ode_dim = 20
 n_classes = 10
 
 
@@ -141,7 +141,7 @@ def run(reg, lam, rng, dirname):
 
     train_images, train_labels, test_images, test_labels = datasets.mnist()
 
-    num_train = train_images.shape[-1]
+    num_train = train_images.shape[0]
     num_complete_batches, leftover = divmod(num_train, parse_args.batch_size)
     num_batches = num_complete_batches + bool(leftover)
 
