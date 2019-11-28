@@ -8,10 +8,12 @@ results=$5
 reg=$6
 lam=$7
 
+flags="--mem=$mem -o ${results}/slurm-%j.out"
+
 if [ $node = "gpu" ]; then
-    command="sbatch -p p100 --mem=$mem --gres=gpu:1"
+    command="sbatch -p p100 --gres=gpu:1 $flags"
 else
-    command="sbatch -p cpu --mem=$mem"
+    command="sbatch -p cpu $flags"
 fi
 
 # create shell script for job
