@@ -247,7 +247,7 @@ def pend(np, y, _, m, g):
   theta, omega = y
   return [omega, -m * omega - g * np.sin(theta)]
 
-def benchmark_odeint(fun, y0, tspace, *args):
+def benchmark_odeint(method, fun, y0, tspace, *args):
   """Time performance of JAX odeint method against scipy.integrate.odeint."""
   n_trials = 10
   n_repeat = 100
@@ -267,7 +267,7 @@ def benchmark_odeint(fun, y0, tspace, *args):
   for k in range(n_trials):
     start = time.time()
     for _ in range(n_repeat):
-      jax_result = odeint(jax_fun, y0, tspace, *args)
+      jax_result = odeint(jax_fun, y0, tspace, *args, method=method)
     jax_result.block_until_ready()
     end = time.time()
     print('JAX odeint elapsed time ({} of {}): {}'.format(k+1, n_trials, end-start))
@@ -278,13 +278,13 @@ def benchmark_odeint(fun, y0, tspace, *args):
       np.linalg.norm(np.asarray(scipy_result) - jax_result)))
   return scipy_result, jax_result
 
-def pend_benchmark_odeint():
-  _, _ = benchmark_odeint(pend, [np.pi - 0.1, 0.0], np.linspace(0., 10., 101),
+def pend_benchmark_odeint(method):
+  _, _ = benchmark_odeint(method, pend, [np.pi - 0.1, 0.0], np.linspace(0., 10., 101),
                           0.25, 9.8)
 
-def pend_check_grads():
+def pend_check_grads(method):
   def f(y0, ts, *args):
-    return odeint(partial(pend, np), y0, ts, *args)
+    return odeint(partial(pend, np), y0, ts, *args, method=method)
 
   y0 = [np.pi - 0.1, 0.0]
   ts = np.linspace(0., 1., 11)
@@ -295,5 +295,5 @@ def pend_check_grads():
 
 
 if __name__ == '__main__':
-  pend_benchmark_odeint()
-  pend_check_grads()
+  pend_benchmark_odeint("dopri5")
+  pend_check_grads("dopri5")
