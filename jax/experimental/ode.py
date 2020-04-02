@@ -136,7 +136,7 @@ def optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0,
                       np.minimum(err_ratio**(1.0 / order) / safety, 1.0 / dfactor))
   return np.where(mean_error_ratio == 0, last_step * ifactor, last_step / factor)
 
-def odeint(func, y0, t, *args, rtol=1.4e-8, atol=1.4e-8, mxstep=np.inf):
+def odeint(func, y0, t, *args, rtol=1.4e-8, atol=1.4e-8, mxstep=np.inf, method="dopri5"):
   """Adaptive stepsize (Dormand-Prince) Runge-Kutta odeint implementation.
 
   Args:
@@ -155,17 +155,18 @@ def odeint(func, y0, t, *args, rtol=1.4e-8, atol=1.4e-8, mxstep=np.inf):
     point in `t`, represented as an array (or pytree of arrays) with the same
     shape/structure as `y0` except with a new leading axis of length `len(t)`.
   """
-  return _odeint_wrapper(func, rtol, atol, mxstep, y0, t, *args)
+  return _odeint_wrapper(func, rtol, atol, mxstep, method, y0, t, *args)
 
-@partial(jax.jit, static_argnums=(0, 1, 2, 3))
-def _odeint_wrapper(func, rtol, atol, mxstep, y0, ts, *args):
+@partial(jax.jit, static_argnums=(0, 1, 2, 3, 4))
+def _odeint_wrapper(func, rtol, atol, mxstep, method, y0, ts, *args):
   y0, unravel = ravel_pytree(y0)
   func = ravel_first_arg(func, unravel)
+  _odeint = methods[method]
   out = _odeint(func, rtol, atol, mxstep, y0, ts, *args)
   return jax.vmap(unravel)(out)
 
 @partial(jax.custom_vjp, nondiff_argnums=(0, 1, 2, 3))
-def _odeint(func, rtol, atol, mxstep, y0, ts, *args):
+def _dopri5_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   func_ = lambda y, t: func(y, t, *args)
 
   def scan_fun(carry, target_t):
@@ -199,11 +200,11 @@ def _odeint(func, rtol, atol, mxstep, y0, ts, *args):
   _, ys = lax.scan(scan_fun, init_carry, ts[1:])
   return np.concatenate((y0[None], ys))
 
-def _odeint_fwd(func, rtol, atol, mxstep, y0, ts, *args):
+def _odeint_fwd(_odeint, func, rtol, atol, mxstep, y0, ts, *args):
   ys = _odeint(func, rtol, atol, mxstep, y0, ts, *args)
   return ys, (ys, ts, args)
 
-def _odeint_rev(func, rtol, atol, mxstep, res, g):
+def _odeint_rev(method, func, rtol, atol, mxstep, res, g):
   ys, ts, args = res
 
   def aug_dynamics(augmented_state, t, *args):
@@ -224,7 +225,7 @@ def _odeint_rev(func, rtol, atol, mxstep, res, g):
     # Run augmented system backwards to previous observation
     _, y_bar, t0_bar, args_bar = odeint(
         aug_dynamics, (ys[i], y_bar, t0_bar, args_bar), np.array([ts[i - 1], ts[i]]),
-        *args, rtol=rtol, atol=atol, mxstep=mxstep)
+        *args, rtol=rtol, atol=atol, mxstep=mxstep, method=method)
     y_bar, t0_bar, args_bar = tree_map(op.itemgetter(1), (y_bar, t0_bar, args_bar))
     # Add gradient from current output
     y_bar = y_bar + g[i - 1]
@@ -236,7 +237,10 @@ def _odeint_rev(func, rtol, atol, mxstep, res, g):
   ts_bar = np.concatenate([np.array([t0_bar]), rev_ts_bar[::-1]])
   return (y_bar, ts_bar, *args_bar)
 
-_odeint.defvjp(_odeint_fwd, _odeint_rev)
+methods = {
+  "dopri5": _dopri5_odeint,
+}
+_dopri5_odeint.defvjp(partial(_odeint_fwd, _dopri5_odeint), partial(_odeint_rev, "dopri5"))
 
 
 def pend(np, y, _, m, g):
