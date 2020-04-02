@@ -319,8 +319,48 @@ def pend_get_nfe():
   print("Forward NFE:\t", int(f_nfe))
   print("Backward NFE:\t", int(b_nfe))
 
+def pend_vmap_odeint():
+  def f(y0, ts, *args):
+    return odeint(partial(pend, np), y0, ts, *args)
+
+  # batched pend
+  y0 = np.array([np.pi - np.linspace(-0.2, -0.01, num=10), np.zeros(10)])
+  # y0 = np.expand_dims(np.array([np.pi - 0.1, 0.0]), axis=1)
+  ts = np.linspace(0., 1., 11)
+  args = (0.25, 9.8)
+
+  batched_vmap = jax.vmap(lambda _y0: f(_y0, ts, *args), in_axes=1, out_axes=-1)
+
+  ys_nfe, ys = batched_vmap(y0)
+  print(ys_nfe)
+  batch_ys_nfe, batch_ys = f(y0, ts, *args)
+  print(batch_ys_nfe)
+
+  print(np.sum((ys - batch_ys) ** 2))
+
+def pend_vmap_batch_odeint():
+  def f(y0):
+    return odeint(lambda x, t: np.sin(x), y0, np.array([0., 1.]))
+
+  def examine_jaxpr(typed_jaxpr):
+    jaxpr = typed_jaxpr.jaxpr
+    # print("invars:", jaxpr.invars)
+    # print("outvars:", jaxpr.outvars)
+    # print("constvars:", jaxpr.constvars)
+    for eqn in jaxpr.eqns:
+      print("EQUATION:", eqn.invars, eqn.primitive, eqn.outvars, eqn.params)
+    # print()
+    # print("jaxpr:", jaxpr)
+
+  batched_vmap = jax.vmap(f, in_axes=1, out_axes=-1)
+  y0 = np.ones((3, 1))
+  ys_nfe, ys = batched_vmap(y0)
+  # print(ys.shape)
+  examine_jaxpr(jax.make_jaxpr(batched_vmap)(y0))
 
 if __name__ == '__main__':
-  pend_benchmark_odeint()
-  pend_check_grads()
-  pend_get_nfe()
+  # pend_benchmark_odeint()
+  # pend_check_grads()
+  # pend_get_nfe()
+  # pend_vmap_odeint()
+  pend_vmap_batch_odeint()
