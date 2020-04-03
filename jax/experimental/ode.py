@@ -42,6 +42,8 @@ import scipy.integrate as osp_integrate
 map = safe_map
 zip = safe_zip
 
+_ADAMS_MAX_ORDER = 12
+
 
 def ravel_first_arg(f, unravel):
   return ravel_first_arg_(lu.wrap_init(f), unravel).call_wrapped
@@ -120,9 +122,154 @@ def runge_kutta_step(func, y0, f0, t0, dt):
   f1 = k[-1]
   return y1, f1, y1_error, k
 
+def _g_and_explicit_phi(prev_t, next_t, implicit_phi, k):
+  curr_t = prev_t[0]
+  dt = next_t - prev_t[0]
+
+  beta = 1.
+
+  explicit_phi = np.zeros_like(implicit_phi)
+  jax.ops.index_update(explicit_phi, 0, implicit_phi[0])
+
+  c = 1 / np.arange(1, _ADAMS_MAX_ORDER + 2)
+
+  g = np.zeros(_ADAMS_MAX_ORDER + 1)
+  jax.ops.index_update(g, 0, 1)
+
+  def body_fun(i, val):
+    beta, explicit_phi, c, g = val
+
+    beta = (next_t - prev_t[i - 1]) / (curr_t - prev_t[i]) * beta
+    jax.ops.index_update(explicit_phi, i, implicit_phi[i] * beta)
+
+    # TODO: make notation more clear with textbook or Ricky's code as reference
+    idxs = np.arange(_ADAMS_MAX_ORDER + 1)
+    c_q = np.where(idxs < k - i + 1, c, 0)   # c[:k - i + 1]
+    c_q_1 = np.where(idxs < k + 1 - i + 1, np.where(idxs >= 1, c, 0), 0)  # c[1:k + 1 - i + 1]
+    # shift so that it lines up with diff1
+    jax.ops.index_update(c_q_1, jax.ops.index[:-1], c_q_1[1:])
+    # c[:k - i + 1] - c[1:k + 1 - i + 1]
+    c = lax.cond(i == 1, None, lambda _: c_q - c_q_1, None, lambda _: c_q - c_q_1 * dt / (next_t - prev_t[i - 1]))
+    jax.ops.index_update(g, i, c[0])
+
+    val = beta, explicit_phi, c, g
+    return val
+
+  # TODO: should we do _ADAMS_MAX_ORDER instead and a no-op?
+  beta, explicit_phi, c, g = lax.fori_loop(1, k, body_fun, (beta, explicit_phi, c, g))
+
+  # do the c and g update for i = k
+  jax.ops.index_update(c, jax.ops.index[:1], c[:1] - c[1:2] * dt / (next_t - prev_t[k - 1]))
+  jax.ops.index_update(g, k, c[0])
+
+  return g, explicit_phi
+
+def _compute_implicit_phi(explicit_phi, f_n, phi_order, k):
+  k = lax.min(phi_order + 1, k)
+  implicit_phi = np.zeros_like(explicit_phi)
+  jax.ops.index_update(implicit_phi, 0, f_n)
+  def body_fun(i, val):
+    implicit_phi = val
+    jax.ops.index_update(implicit_phi, i, implicit_phi[i - 1] - explicit_phi[i - 1])
+    return implicit_phi
+  implicit_phi = lax.fori_loop(1, k, body_fun, implicit_phi)
+  return implicit_phi
+
+def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, target_t, rtol, atol):
+  gamma_star = np.array([
+    1, -1 / 2, -1 / 12, -1 / 24, -19 / 720, -3 / 160, -863 / 60480, -275 / 24192, -33953 / 3628800, -0.00789255,
+    -0.00678585, -0.00592406, -0.00523669, -0.0046775, -0.00421495, -0.0038269
+  ])
+  next_t = lax.min(next_t, target_t)
+  dt = next_t - prev_t[0]
+
+  # explicit predictor step
+  g, phi = _g_and_explicit_phi(prev_t, next_t, prev_phi, order)
+
+  # compute y0 + dt * np.dot(phi[:max(1, order - 1)].T, g[:max(1, order - 1)])
+  p_next = y0 + dt * np.dot(np.where(np.arange(_ADAMS_MAX_ORDER) < lax.max(1, order - 1), phi.T, 0),
+                            np.where(np.arange(_ADAMS_MAX_ORDER + 1) < lax.max(1, order - 1), g, 0)[:-1])
+
+  # update phi to implicit
+  next_f0 = func(p_next, next_t)
+  implicit_phi_p = _compute_implicit_phi(phi, next_f0, order, order + 1)
+
+  # Implicit corrector step.
+  y_next = p_next + dt * g[order - 1] * implicit_phi_p[order - 1]
+
+  def compute_error_estimate(order):
+    return dt * (g[order] - g[order - 1]) * implicit_phi_p[order]
+
+  # Error estimation.
+  local_error = compute_error_estimate(order)
+  tolerance = error_tolerance(rtol, atol, y0, y_next)
+  error_k = error_ratio_tol(local_error, tolerance)
+  accept_step = np.all(error_k <= 1.)
+
+  def accept(_):
+    next_f0 = func(y_next, next_t)
+    implicit_phi = _compute_implicit_phi(phi, next_f0, order, order + 2)
+
+    next_order = \
+      lax.cond(
+        len(prev_t) <= 4 or order < 3,
+          None,
+          lambda _: lax.min(order + 1, lax.min(3, _ADAMS_MAX_ORDER)),
+          (error_ratio_tol(compute_error_estimate(order - 1), tolerance),
+          error_ratio_tol(compute_error_estimate(order - 2), tolerance)),
+          lambda errs:
+          lax.cond(
+            np.min(errs[0] + errs[1]) < np.max(error_k),
+              None,
+              lambda _: order - 1,
+              None,
+              lambda _:
+              lax.cond(
+                order < _ADAMS_MAX_ORDER,
+                  error_ratio_tol(dt * gamma_star[order] * implicit_phi_p[order], tolerance),
+                  lambda error_kp1:
+                  lax.cond(
+                    np.max(error_kp1) < np.max(error_k),
+                      None,
+                      lambda _: order + 1,
+                      None,
+                      lambda _: order
+                  ),
+                  None,
+                  lambda _: order
+              )
+          )
+      )
+
+    # Keep step size constant if increasing order. Else use adaptive step size.
+    dt_next = lax.cond(next_order > order,
+                       None, lambda _: dt,
+                       None, lambda _: optimal_step_size(dt, error_k, order=order+1))
+
+    # shift right and insert at 0
+
+    jax.ops.index_update(prev_f, jax.ops.index[1:], prev_f[:-1])
+    jax.ops.index_update(prev_f, 0, next_f0)
+
+    jax.ops.index_update(prev_t, jax.ops.index[1:], prev_t[:-1])
+    jax.ops.index_update(prev_t, 0, next_t)
+
+    return p_next, prev_f, prev_t, next_t + dt_next, implicit_phi, next_order
+
+  def reject(_):
+    dt_next = optimal_step_size(dt, error_k, order=order)
+    return y0, prev_f, prev_t, prev_t[0] + dt_next, prev_phi, order
+
+  return lax.cond(accept_step, None, accept, None, reject)
+
 def error_ratio(error_estimate, rtol, atol, y0, y1):
-  err_tol = atol + rtol * np.maximum(np.abs(y0), np.abs(y1))
-  err_ratio = error_estimate / err_tol
+  return error_ratio_tol(error_estimate, error_tolerance(rtol, atol, y0, y1))
+
+def error_tolerance(rtol, atol, y0, y1):
+  return atol + rtol * np.maximum(np.abs(y0), np.abs(y1))
+
+def error_ratio_tol(error_estimate, error_tolerance):
+  err_ratio = error_estimate / error_tolerance
   return np.mean(err_ratio ** 2)
 
 def optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0,
@@ -200,6 +347,54 @@ def _dopri5_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   _, ys = lax.scan(scan_fun, init_carry, ts[1:])
   return np.concatenate((y0[None], ys))
 
+@partial(jax.custom_vjp, nondiff_argnums=(0, 1, 2, 3))
+def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
+  func_ = lambda y, t: func(y, t, *args)
+
+  def scan_fun(carry, target_t):
+
+    def cond_fun(state):
+      i, _, _, prev_t, _, _, _ = state
+      return (prev_t[0] < target_t) & (i < mxstep)  # TODO: is it prev_t[0]?
+
+    def body_fun(state):
+      i, y, prev_f, prev_t, next_t, prev_phi, order = state
+      y, prev_f, prev_t, next_t, prev_phi, order = \
+        adaptive_adams_step(func_, y, prev_f, prev_t, next_t, prev_phi, order, target_t, rtol, atol)
+      return [i + 1, y, prev_f, prev_t, next_t, prev_phi, order]
+
+    _, *carry = lax.while_loop(cond_fun, body_fun, [0] + carry)
+    y_target, *_ = carry
+    return carry, y_target
+
+  t0 = ts[0]
+  f0 = func_(y0, t0)
+  ode_dim = f0.shape[0]
+  dt = initial_step_size(func_, t0, y0, 2, rtol, atol, f0)
+
+  # TODO: can we make this a list instead?
+  prev_f = np.empty((_ADAMS_MAX_ORDER + 1, ode_dim))
+  jax.ops.index_update(prev_f, 0, f0)
+
+  prev_t = np.empty(_ADAMS_MAX_ORDER + 1)
+  jax.ops.index_update(prev_t, 0, t0)
+
+  prev_phi = np.empty((_ADAMS_MAX_ORDER, ode_dim))
+  jax.ops.index_update(prev_phi, 0, f0)
+
+  next_t = t0 + dt
+  init_order = 1
+
+  init_carry = [y0,
+                prev_f,
+                prev_t,
+                next_t,
+                prev_phi,
+                init_order]
+  _, ys = lax.scan(scan_fun, init_carry, ts[1:])
+
+  return np.concatenate((y0[None], ys))
+
 def _odeint_fwd(_odeint, func, rtol, atol, mxstep, y0, ts, *args):
   ys = _odeint(func, rtol, atol, mxstep, y0, ts, *args)
   return ys, (ys, ts, args)
@@ -239,9 +434,10 @@ def _odeint_rev(method, func, rtol, atol, mxstep, res, g):
 
 methods = {
   "dopri5": _dopri5_odeint,
+  "adams": _adams_odeint
 }
+_adams_odeint.defvjp(partial(_odeint_fwd, _adams_odeint), partial(_odeint_rev, "adams"))
 _dopri5_odeint.defvjp(partial(_odeint_fwd, _dopri5_odeint), partial(_odeint_rev, "dopri5"))
-
 
 def pend(np, y, _, m, g):
   theta, omega = y
@@ -295,5 +491,5 @@ def pend_check_grads(method):
 
 
 if __name__ == '__main__':
-  pend_benchmark_odeint("dopri5")
-  pend_check_grads("dopri5")
+  pend_benchmark_odeint("adams")
+  pend_check_grads("adams")
