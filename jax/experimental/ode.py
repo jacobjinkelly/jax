@@ -507,7 +507,7 @@ def const_test(method):
   sol = exact(t_points)
   y0 = sol[0]
   ys = odeint(f, y0, t_points, method=method)
-  print("Const", _max_abs(sol - ys), _rel_error(sol, ys))
+  print("Constant\t(abs, rel)\t%.4e, %.4e" % (_max_abs(sol - ys), _rel_error(sol, ys)))
 
 def linear_test(method):
   dim = 10
@@ -527,7 +527,7 @@ def linear_test(method):
   sol = exact(t_points)
   y0 = sol[0]
   ys = odeint(f, y0, t_points, method=method)
-  print("Linear: ", _max_abs(sol - ys), _rel_error(sol, ys))
+  print("Linear\t\t(abs, rel)\t%.4e, %.4e" % (_max_abs(sol - ys), _rel_error(sol, ys)))
 
 def sin_test(method):
   f = lambda y, t: 2 * y / t + t**4 * np.sin(2 * t) - t**2 + 4 * t**3
@@ -538,7 +538,7 @@ def sin_test(method):
   sol = exact(t_points)
   y0 = sol[0]
   ys = odeint(f, y0, t_points, method=method)
-  print("Sin: ", _max_abs(sol - ys), _rel_error(sol, ys))
+  print("Sine\t\t(abs, rel)\t%.4e, %.4e" % (_max_abs(sol - ys), _rel_error(sol, ys)))
 
 if __name__ == '__main__':
   const_test("adams")
