@@ -38,6 +38,7 @@ from jax.tree_util import tree_map
 from jax import linear_util as lu
 import numpy as onp
 import scipy.integrate as osp_integrate
+import scipy
 
 map = safe_map
 zip = safe_zip
@@ -490,7 +491,58 @@ def pend_check_grads(method):
   check_grads(f, (y0, ts, *args), modes=["rev"], order=2,
               atol=1e-1, rtol=1e-1)
 
+def _max_abs(tensor):
+    return np.max(np.abs(tensor))
+
+def _rel_error(true, estimate):
+    return _max_abs((true - estimate) / true)
+
+def const_test(method):
+  a = 0.2
+  b = 3.
+  f = lambda y, t: a + (y - (a * t + b)) ** 5
+  exact = lambda t: a * t + b
+
+  t_points = np.linspace(1, 50, 10)
+  sol = exact(t_points)
+  y0 = sol[0]
+  ys = odeint(f, y0, t_points, method=method)
+  print("Const", _max_abs(sol - ys), _rel_error(sol, ys))
+
+def linear_test(method):
+  dim = 10
+  rng = jax.random.PRNGKey(0)
+  U = jax.random.normal(rng, (dim, dim)) * 0.1
+  A = 2 * U - (U + U.T)
+  initial_val = np.ones((dim, 1))
+
+  f = lambda y, t: np.dot(A, y)
+  def exact(t):
+    ans = []
+    for t_i in t:
+        ans.append(np.matmul(scipy.linalg.expm(A * t_i), initial_val))
+    return np.stack([np.array(ans_) for ans_ in ans]).reshape(len(t), dim)
+
+  t_points = np.linspace(1, 50, 10)
+  sol = exact(t_points)
+  y0 = sol[0]
+  ys = odeint(f, y0, t_points, method=method)
+  print("Linear: ", _max_abs(sol - ys), _rel_error(sol, ys))
+
+def sin_test(method):
+  f = lambda y, t: 2 * y / t + t**4 * np.sin(2 * t) - t**2 + 4 * t**3
+  exact = lambda t: -0.5 * t**4 * np.cos(2 * t) + 0.5 * t**3 * np.sin(2 * t) + 0.25 * t**2 * np.cos(2 * t) - \
+                    t**3 + 2 * t**4 + (np.pi - 0.25) * t**2
+
+  t_points = np.linspace(1, 50, 10)
+  sol = exact(t_points)
+  y0 = sol[0]
+  ys = odeint(f, y0, t_points, method=method)
+  print("Sin: ", _max_abs(sol - ys), _rel_error(sol, ys))
 
 if __name__ == '__main__':
-  pend_benchmark_odeint("adams")
-  pend_check_grads("adams")
+  const_test("adams")
+  linear_test("adams")
+  sin_test("adams")
+  # pend_benchmark_odeint("adams")
+  # pend_check_grads("adams")
