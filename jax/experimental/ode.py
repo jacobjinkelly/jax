@@ -255,11 +255,11 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
     prev_t = jax.ops.index_update(prev_t, jax.ops.index[1:], prev_t[:-1])
     prev_t = jax.ops.index_update(prev_t, 0, next_t)
 
-    return p_next, prev_f, prev_t, next_t + dt_next, implicit_phi, next_order
+    return p_next, prev_f, prev_t, next_t + dt_next, implicit_phi, next_order, 2
 
   def reject(_):
     dt_next = optimal_step_size(dt, error_k, order=order)
-    return y0, prev_f, prev_t, prev_t[0] + dt_next, prev_phi, order
+    return y0, prev_f, prev_t, prev_t[0] + dt_next, prev_phi, order, 1
 
   # TODO: why is scoping only need for some of the variables? and in only one of the cases?
   return lax.cond(accept_step, (prev_t, prev_f), accept, None, reject)
@@ -311,8 +311,8 @@ def _odeint_wrapper(func, rtol, atol, mxstep, method, y0, ts, *args):
   y0, unravel = ravel_pytree(y0)
   func = ravel_first_arg(func, unravel)
   _odeint = methods[method]
-  out = _odeint(func, rtol, atol, mxstep, y0, ts, *args)
-  return jax.vmap(unravel)(out)
+  out, nfe = _odeint(func, rtol, atol, mxstep, y0, ts, *args)
+  return jax.vmap(unravel)(out), nfe
 
 @partial(jax.custom_vjp, nondiff_argnums=(0, 1, 2, 3))
 def _dopri5_odeint(func, rtol, atol, mxstep, y0, ts, *args):
@@ -336,8 +336,10 @@ def _dopri5_odeint(func, rtol, atol, mxstep, y0, ts, *args):
       old = [i + 1,      y,      f,      t, dt, last_t,     interp_coeff]
       return map(partial(np.where, np.all(error_ratios <= 1.)), new, old)
 
-    _, *carry = lax.while_loop(cond_fun, body_fun, [0] + carry)
-    _, _, t, _, last_t, interp_coeff = carry
+    nfe = carry[-1]
+    n_steps, *carry_ = lax.while_loop(cond_fun, body_fun, [0] + carry[:-1])
+    carry = carry_ + [nfe + 6 * n_steps]
+    _, _, t, _, last_t, interp_coeff = carry[:-1]
     relative_output_time = (target_t - last_t) / (t - last_t)
     y_target = np.polyval(interp_coeff, relative_output_time)
     return carry, y_target
@@ -345,9 +347,11 @@ def _dopri5_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   f0 = func_(y0, ts[0])
   dt = initial_step_size(func_, ts[0], y0, 4, rtol, atol, f0)
   interp_coeff = np.array([y0] * 5)
-  init_carry = [y0, f0, ts[0], dt, ts[0], interp_coeff]
-  _, ys = lax.scan(scan_fun, init_carry, ts[1:])
-  return np.concatenate((y0[None], ys))
+  init_nfe = 2
+  init_carry = [y0, f0, ts[0], dt, ts[0], interp_coeff, init_nfe]
+  carry, ys = lax.scan(scan_fun, init_carry, ts[1:])
+  nfe = carry[-1]
+  return np.concatenate((y0[None], ys)), nfe
 
 @partial(jax.custom_vjp, nondiff_argnums=(0, 1, 2, 3))
 def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
@@ -356,14 +360,14 @@ def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   def scan_fun(carry, target_t):
 
     def cond_fun(state):
-      i, _, _, prev_t, _, _, _ = state
+      i, _, _, prev_t, _, _, _, _ = state
       return (prev_t[0] < target_t) & (i < mxstep)  # TODO: is it prev_t[0]?
 
     def body_fun(state):
-      i, y, prev_f, prev_t, next_t, prev_phi, order = state
-      y, prev_f, prev_t, next_t, prev_phi, order = \
+      i, y, prev_f, prev_t, next_t, prev_phi, order, nfe = state
+      y, prev_f, prev_t, next_t, prev_phi, order, cur_nfe = \
         adaptive_adams_step(func_, y, prev_f, prev_t, next_t, prev_phi, order, target_t, rtol, atol)
-      return [i + 1, y, prev_f, prev_t, next_t, prev_phi, order]
+      return [i + 1, y, prev_f, prev_t, next_t, prev_phi, order, nfe + cur_nfe]
 
     _, *carry = lax.while_loop(cond_fun, body_fun, [0] + carry)
     y_target, *_ = carry
@@ -386,19 +390,22 @@ def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   next_t = t0 + dt
   init_order = 1
 
+  init_nfe = 2  # for calculating initial step size
+
   init_carry = [y0,
                 prev_f,
                 prev_t,
                 next_t,
                 prev_phi,
-                init_order]
+                init_order,
+                init_nfe]
 
-  _, ys = lax.scan(scan_fun, init_carry, ts[1:])
-
-  return np.concatenate((y0[None], ys))
+  carry, ys = lax.scan(scan_fun, init_carry, ts[1:])
+  nfe = carry[-1]
+  return np.concatenate((y0[None], ys)), nfe
 
 def _odeint_fwd(_odeint, func, rtol, atol, mxstep, y0, ts, *args):
-  ys = _odeint(func, rtol, atol, mxstep, y0, ts, *args)
+  ys = _odeint(func, rtol, atol, mxstep, y0, ts, *args)[0]
   return ys, (ys, ts, args)
 
 def _odeint_rev(method, func, rtol, atol, mxstep, res, g):
@@ -506,8 +513,10 @@ def const_test(method):
   t_points = np.linspace(1, 50, 10)
   sol = exact(t_points)
   y0 = sol[0]
-  ys = odeint(f, y0, t_points, method=method)
-  print("Constant\t(abs, rel)\t%.4e, %.4e" % (_max_abs(sol - ys), _rel_error(sol, ys)))
+  ys, nfe = odeint(f, y0, t_points, method=method)
+  sc_ys, infodict = osp_integrate.odeint(f, onp.array(y0), onp.array(t_points), full_output=True)
+  sc_nfe = infodict["nfe"][-1]
+  print("Constant\t(abs, rel, nfe, sc_nfe)\t%.4e, %.4e, %d, %d" % (_max_abs(sol - ys), _rel_error(sol, ys), nfe, sc_nfe))
 
 def linear_test(method):
   dim = 10
@@ -516,7 +525,7 @@ def linear_test(method):
   A = 2 * U - (U + U.T)
   initial_val = np.ones((dim, 1))
 
-  f = lambda y, t: np.dot(A, y)
+  f = lambda np, y, t: np.dot(A, y)
   def exact(t):
     ans = []
     for t_i in t:
@@ -526,23 +535,29 @@ def linear_test(method):
   t_points = np.linspace(1, 50, 10)
   sol = exact(t_points)
   y0 = sol[0]
-  ys = odeint(f, y0, t_points, method=method)
-  print("Linear\t\t(abs, rel)\t%.4e, %.4e" % (_max_abs(sol - ys), _rel_error(sol, ys)))
+  ys, nfe = odeint(partial(f, np), y0, t_points, method=method)
+  sc_ys, infodict = osp_integrate.odeint(partial(f, onp), onp.array(y0), onp.array(t_points), full_output=True)
+  sc_nfe = infodict["nfe"][-1]
+  print("Linear\t\t(abs, rel, nfe, sc_nfe)\t%.4e, %.4e, %d, %d" % (_max_abs(sol - ys), _rel_error(sol, ys), nfe, sc_nfe))
 
 def sin_test(method):
-  f = lambda y, t: 2 * y / t + t**4 * np.sin(2 * t) - t**2 + 4 * t**3
+  f = lambda np, y, t: 2 * y / t + t**4 * np.sin(2 * t) - t**2 + 4 * t**3
   exact = lambda t: -0.5 * t**4 * np.cos(2 * t) + 0.5 * t**3 * np.sin(2 * t) + 0.25 * t**2 * np.cos(2 * t) - \
                     t**3 + 2 * t**4 + (np.pi - 0.25) * t**2
 
   t_points = np.linspace(1, 50, 10)
   sol = exact(t_points)
   y0 = sol[0]
-  ys = odeint(f, y0, t_points, method=method)
-  print("Sine\t\t(abs, rel)\t%.4e, %.4e" % (_max_abs(sol - ys), _rel_error(sol, ys)))
+  ys, nfe = odeint(partial(f, np), y0, t_points, method=method)
+  sc_ys, infodict = osp_integrate.odeint(partial(f, onp), onp.array(y0), onp.array(t_points), full_output=True)
+  sc_nfe = infodict["nfe"][-1]
+  print("Sine\t\t(abs, rel, nfe, sc_nfe)\t%.4e, %.4e, %d, %d" % (_max_abs(sol - ys), _rel_error(sol, ys), nfe, sc_nfe))
 
 if __name__ == '__main__':
-  const_test("adams")
-  linear_test("adams")
-  sin_test("adams")
-  # pend_benchmark_odeint("adams")
-  # pend_check_grads("adams")
+  method = "adams"
+  const_test(method)
+  linear_test(method)
+  sin_test(method)
+  # pend_benchmark_odeint(method)
+  # pend_check_grads(method)
+  print("method\t\t", method)
