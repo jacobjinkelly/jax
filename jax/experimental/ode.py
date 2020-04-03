@@ -129,28 +129,28 @@ def _g_and_explicit_phi(prev_t, next_t, implicit_phi, k):
   beta = 1.
 
   explicit_phi = np.zeros_like(implicit_phi)
-  jax.ops.index_update(explicit_phi, 0, implicit_phi[0])
+  explicit_phi = jax.ops.index_update(explicit_phi, 0, implicit_phi[0])
 
   c = 1 / np.arange(1, _ADAMS_MAX_ORDER + 2)
 
   g = np.zeros(_ADAMS_MAX_ORDER + 1)
-  jax.ops.index_update(g, 0, 1)
+  g = jax.ops.index_update(g, 0, 1)
 
   def body_fun(i, val):
     beta, explicit_phi, c, g = val
 
     beta = (next_t - prev_t[i - 1]) / (curr_t - prev_t[i]) * beta
-    jax.ops.index_update(explicit_phi, i, implicit_phi[i] * beta)
+    explicit_phi = jax.ops.index_update(explicit_phi, i, implicit_phi[i] * beta)
 
     # TODO: make notation more clear with textbook or Ricky's code as reference
     idxs = np.arange(_ADAMS_MAX_ORDER + 1)
     c_q = np.where(idxs < k - i + 1, c, 0)   # c[:k - i + 1]
     c_q_1 = np.where(idxs < k + 1 - i + 1, np.where(idxs >= 1, c, 0), 0)  # c[1:k + 1 - i + 1]
     # shift so that it lines up with diff1
-    jax.ops.index_update(c_q_1, jax.ops.index[:-1], c_q_1[1:])
+    c_q_1 = jax.ops.index_update(c_q_1, jax.ops.index[:-1], c_q_1[1:])
     # c[:k - i + 1] - c[1:k + 1 - i + 1]
     c = lax.cond(i == 1, None, lambda _: c_q - c_q_1, None, lambda _: c_q - c_q_1 * dt / (next_t - prev_t[i - 1]))
-    jax.ops.index_update(g, i, c[0])
+    g = jax.ops.index_update(g, i, c[0])
 
     val = beta, explicit_phi, c, g
     return val
@@ -159,18 +159,18 @@ def _g_and_explicit_phi(prev_t, next_t, implicit_phi, k):
   beta, explicit_phi, c, g = lax.fori_loop(1, k, body_fun, (beta, explicit_phi, c, g))
 
   # do the c and g update for i = k
-  jax.ops.index_update(c, jax.ops.index[:1], c[:1] - c[1:2] * dt / (next_t - prev_t[k - 1]))
-  jax.ops.index_update(g, k, c[0])
+  c = jax.ops.index_update(c, jax.ops.index[:1], c[:1] - c[1:2] * dt / (next_t - prev_t[k - 1]))
+  g = jax.ops.index_update(g, k, c[0])
 
   return g, explicit_phi
 
 def _compute_implicit_phi(explicit_phi, f_n, phi_order, k):
   k = lax.min(phi_order + 1, k)
   implicit_phi = np.zeros_like(explicit_phi)
-  jax.ops.index_update(implicit_phi, 0, f_n)
+  implicit_phi = jax.ops.index_update(implicit_phi, 0, f_n)
   def body_fun(i, val):
     implicit_phi = val
-    jax.ops.index_update(implicit_phi, i, implicit_phi[i - 1] - explicit_phi[i - 1])
+    implicit_phi = jax.ops.index_update(implicit_phi, i, implicit_phi[i - 1] - explicit_phi[i - 1])
     return implicit_phi
   implicit_phi = lax.fori_loop(1, k, body_fun, implicit_phi)
   return implicit_phi
@@ -206,10 +206,10 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
   error_k = error_ratio_tol(local_error, tolerance)
   accept_step = np.all(error_k <= 1.)
 
-  def accept(_):
+  def accept(tpl):
+    prev_t, prev_f = tpl
     next_f0 = func(y_next, next_t)
     implicit_phi = _compute_implicit_phi(phi, next_f0, order, order + 2)
-
     next_order = \
       lax.cond(
         len(prev_t) <= 4 or order < 3,
@@ -248,11 +248,11 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
 
     # shift right and insert at 0
 
-    jax.ops.index_update(prev_f, jax.ops.index[1:], prev_f[:-1])
-    jax.ops.index_update(prev_f, 0, next_f0)
+    prev_f = jax.ops.index_update(prev_f, jax.ops.index[1:], prev_f[:-1])
+    prev_f = jax.ops.index_update(prev_f, 0, next_f0)
 
-    jax.ops.index_update(prev_t, jax.ops.index[1:], prev_t[:-1])
-    jax.ops.index_update(prev_t, 0, next_t)
+    prev_t = jax.ops.index_update(prev_t, jax.ops.index[1:], prev_t[:-1])
+    prev_t = jax.ops.index_update(prev_t, 0, next_t)
 
     return p_next, prev_f, prev_t, next_t + dt_next, implicit_phi, next_order
 
@@ -260,7 +260,8 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
     dt_next = optimal_step_size(dt, error_k, order=order)
     return y0, prev_f, prev_t, prev_t[0] + dt_next, prev_phi, order
 
-  return lax.cond(accept_step, None, accept, None, reject)
+  # TODO: why is scoping only need for some of the variables? and in only one of the cases?
+  return lax.cond(accept_step, (prev_t, prev_f), accept, None, reject)
 
 def error_ratio(error_estimate, rtol, atol, y0, y1):
   return error_ratio_tol(error_estimate, error_tolerance(rtol, atol, y0, y1))
@@ -372,15 +373,14 @@ def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   ode_dim = f0.shape[0]
   dt = initial_step_size(func_, t0, y0, 2, rtol, atol, f0)
 
-  # TODO: can we make this a list instead?
   prev_f = np.empty((_ADAMS_MAX_ORDER + 1, ode_dim))
-  jax.ops.index_update(prev_f, 0, f0)
+  prev_f = jax.ops.index_update(prev_f, 0, f0)
 
   prev_t = np.empty(_ADAMS_MAX_ORDER + 1)
-  jax.ops.index_update(prev_t, 0, t0)
+  prev_t = jax.ops.index_update(prev_t, 0, t0)
 
   prev_phi = np.empty((_ADAMS_MAX_ORDER, ode_dim))
-  jax.ops.index_update(prev_phi, 0, f0)
+  prev_phi = jax.ops.index_update(prev_phi, 0, f0)
 
   next_t = t0 + dt
   init_order = 1
@@ -391,6 +391,7 @@ def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
                 next_t,
                 prev_phi,
                 init_order]
+
   _, ys = lax.scan(scan_fun, init_carry, ts[1:])
 
   return np.concatenate((y0[None], ys))
@@ -436,8 +437,8 @@ methods = {
   "dopri5": _dopri5_odeint,
   "adams": _adams_odeint
 }
-_adams_odeint.defvjp(partial(_odeint_fwd, _adams_odeint), partial(_odeint_rev, "adams"))
 _dopri5_odeint.defvjp(partial(_odeint_fwd, _dopri5_odeint), partial(_odeint_rev, "dopri5"))
+_adams_odeint.defvjp(partial(_odeint_fwd, _adams_odeint), partial(_odeint_rev, "adams"))
 
 def pend(np, y, _, m, g):
   theta, omega = y
