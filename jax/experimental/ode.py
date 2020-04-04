@@ -320,7 +320,7 @@ def pend_get_nfe():
   print("Backward NFE:\t", int(b_nfe))
 
 def pend_vmap_odeint():
-  def f(y0, ts, *args):
+  def f(y0, ts, args):
     return odeint(partial(pend, np), y0, ts, *args)
 
   # batched pend
@@ -329,13 +329,17 @@ def pend_vmap_odeint():
   ts = np.linspace(0., 1., 11)
   args = (0.25, 9.8)
 
-  batched_vmap = jax.vmap(lambda _y0: f(_y0, ts, *args), in_axes=1, out_axes=-1)
+  batched_vmap = jax.vmap(f, (1, None, None), out_axes=-1)
 
-  ys_nfe, ys = batched_vmap(y0)
+  ys_nfe, ys = batched_vmap(y0, ts, args)
   print(ys_nfe)
-  batch_ys_nfe, batch_ys = f(y0, ts, *args)
+  batch_ys_nfe, batch_ys = f(y0, ts, args)
   print(batch_ys_nfe)
 
+  print(ys)
+  print(batch_ys)
+  print(ys.shape)
+  print(batch_ys.shape)
   print(np.sum((ys - batch_ys) ** 2))
 
 def pend_vmap_batch_odeint():
@@ -362,5 +366,5 @@ if __name__ == '__main__':
   # pend_benchmark_odeint()
   # pend_check_grads()
   # pend_get_nfe()
-  # pend_vmap_odeint()
-  pend_vmap_batch_odeint()
+  pend_vmap_odeint()
+  # pend_vmap_batch_odeint()
