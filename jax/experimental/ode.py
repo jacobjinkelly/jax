@@ -143,7 +143,6 @@ def _g_and_explicit_phi(prev_t, next_t, implicit_phi, k):
     beta = (next_t - prev_t[i - 1]) / (curr_t - prev_t[i]) * beta
     explicit_phi = jax.ops.index_update(explicit_phi, i, implicit_phi[i] * beta)
 
-    # TODO: make notation more clear with textbook or Ricky's code as reference
     idxs = np.arange(_ADAMS_MAX_ORDER + 1)
     c_q = np.where(idxs < k - i + 1, c, 0)   # c[:k - i + 1]
     c_q_1 = np.where(idxs < k + 1 - i + 1, np.where(idxs >= 1, c, 0), 0)  # c[1:k + 1 - i + 1]
@@ -156,7 +155,6 @@ def _g_and_explicit_phi(prev_t, next_t, implicit_phi, k):
     val = beta, explicit_phi, c, g
     return val
 
-  # TODO: should we do _ADAMS_MAX_ORDER instead and a no-op?
   beta, explicit_phi, c, g = lax.fori_loop(1, k, body_fun, (beta, explicit_phi, c, g))
 
   # do the c and g update for i = k
@@ -181,7 +179,7 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
     1, -1 / 2, -1 / 12, -1 / 24, -19 / 720, -3 / 160, -863 / 60480, -275 / 24192, -33953 / 3628800, -0.00789255,
     -0.00678585, -0.00592406, -0.00523669, -0.0046775, -0.00421495, -0.0038269
   ])
-  next_t = lax.min(next_t, target_t)
+  next_t = lax.min(next_t, target_t)  # TODO: integrate as far as possible and interpolate
   dt = next_t - prev_t[0]
 
   # explicit predictor step
@@ -205,7 +203,6 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
   local_error = compute_error_estimate(order)
   tolerance = error_tolerance(rtol, atol, y0, y_next)
   error_k = error_ratio_tol(local_error, tolerance)
-  accept_step = np.all(error_k <= 1.)
 
   def accept(tpl):
     prev_t, prev_f = tpl
@@ -245,7 +242,7 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
     # Keep step size constant if increasing order. Else use adaptive step size.
     dt_next = lax.cond(next_order > order,
                        None, lambda _: dt,
-                       None, lambda _: optimal_step_size(dt, error_k, order=order+1))
+                       None, lambda _: optimal_step_size(dt, error_k, order=next_order))
 
     # shift right and insert at 0
 
@@ -261,8 +258,8 @@ def adaptive_adams_step(func, y0, prev_f, prev_t, next_t, prev_phi, order, targe
     dt_next = optimal_step_size(dt, error_k, order=order)
     return y0, prev_f, prev_t, prev_t[0] + dt_next, prev_phi, order, 1
 
-  # TODO: why is scoping only need for some of the variables? and in only one of the cases?
-  return lax.cond(accept_step, (prev_t, prev_f), accept, None, reject)
+  # TODO: why is scoping only needed for some of the variables? and in only one of the cases?
+  return lax.cond(error_k <= 1, (prev_t, prev_f), accept, None, reject)
 
 def error_ratio(error_estimate, rtol, atol, y0, y1):
   return error_ratio_tol(error_estimate, error_tolerance(rtol, atol, y0, y1))
@@ -361,7 +358,7 @@ def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
 
     def cond_fun(state):
       i, _, _, prev_t, _, _, _, _ = state
-      return (prev_t[0] < target_t) & (i < mxstep)  # TODO: is it prev_t[0]?
+      return (prev_t[0] < target_t) & (i < mxstep)
 
     def body_fun(state):
       i, y, prev_f, prev_t, next_t, prev_phi, order, nfe = state
@@ -390,7 +387,7 @@ def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   next_t = t0 + dt
   init_order = 1
 
-  init_nfe = 2  # for calculating initial step size
+  init_nfe = 2
 
   init_carry = [y0,
                 prev_f,
@@ -405,11 +402,12 @@ def _adams_odeint(func, rtol, atol, mxstep, y0, ts, *args):
   return np.concatenate((y0[None], ys)), nfe
 
 def _odeint_fwd(_odeint, func, rtol, atol, mxstep, y0, ts, *args):
-  ys = _odeint(func, rtol, atol, mxstep, y0, ts, *args)[0]
-  return ys, (ys, ts, args)
+  ys, nfe = _odeint(func, rtol, atol, mxstep, y0, ts, *args)
+  return (ys, nfe), (ys, ts, args)
 
 def _odeint_rev(method, func, rtol, atol, mxstep, res, g):
   ys, ts, args = res
+  g, _ = g
 
   def aug_dynamics(augmented_state, t, *args):
     """Original system augmented with vjp_y, vjp_t and vjp_args."""
@@ -429,7 +427,7 @@ def _odeint_rev(method, func, rtol, atol, mxstep, res, g):
     # Run augmented system backwards to previous observation
     _, y_bar, t0_bar, args_bar = odeint(
         aug_dynamics, (ys[i], y_bar, t0_bar, args_bar), np.array([ts[i - 1], ts[i]]),
-        *args, rtol=rtol, atol=atol, mxstep=mxstep, method=method)
+        *args, rtol=rtol, atol=atol, mxstep=mxstep, method=method)[0]
     y_bar, t0_bar, args_bar = tree_map(op.itemgetter(1), (y_bar, t0_bar, args_bar))
     # Add gradient from current output
     y_bar = y_bar + g[i - 1]
@@ -452,7 +450,7 @@ def pend(np, y, _, m, g):
   theta, omega = y
   return [omega, -m * omega - g * np.sin(theta)]
 
-def benchmark_odeint(method, fun, y0, tspace, *args):
+def benchmark_odeint(fun, y0, tspace, *args, **kwargs):
   """Time performance of JAX odeint method against scipy.integrate.odeint."""
   n_trials = 10
   n_repeat = 100
@@ -466,13 +464,18 @@ def benchmark_odeint(method, fun, y0, tspace, *args):
     end = time.time()
     print('scipy odeint elapsed time ({} of {}): {}'.format(k+1, n_trials, end-start))
     scipy_times.append(end - start)
+  scipy_result, infodict = osp_integrate.odeint(onp_fun, y0, tspace, args,
+                                                full_output=True,
+                                                rtol=kwargs["rtol"],
+                                                atol=kwargs["atol"])
+  sc_nfe = infodict["nfe"][-1]
   y0, tspace = np.array(y0), np.array(tspace)
   jax_fun = partial(fun, np)
   jax_times = []
   for k in range(n_trials):
     start = time.time()
     for _ in range(n_repeat):
-      jax_result = odeint(jax_fun, y0, tspace, *args, method=method)
+      jax_result, jax_nfe = odeint(jax_fun, y0, tspace, *args, **kwargs)
     jax_result.block_until_ready()
     end = time.time()
     print('JAX odeint elapsed time ({} of {}): {}'.format(k+1, n_trials, end-start))
@@ -481,15 +484,16 @@ def benchmark_odeint(method, fun, y0, tspace, *args):
       onp.mean(scipy_times[1:]) / onp.mean(jax_times[1:])))
   print('norm(scipy result-jax result): {}'.format(
       np.linalg.norm(np.asarray(scipy_result) - jax_result)))
+  print("jax nfe, scipy nfe", jax_nfe, sc_nfe)
   return scipy_result, jax_result
 
-def pend_benchmark_odeint(method):
-  _, _ = benchmark_odeint(method, pend, [np.pi - 0.1, 0.0], np.linspace(0., 10., 101),
-                          0.25, 9.8)
+def pend_benchmark_odeint(**kwargs):
+  _, _ = benchmark_odeint(pend, [np.pi - 0.1, 0.0], np.linspace(0., 10., 2),
+                          0.25, 9.8, **kwargs)
 
 def pend_check_grads(method):
   def f(y0, ts, *args):
-    return odeint(partial(pend, np), y0, ts, *args, method=method)
+    return odeint(partial(pend, np), y0, ts, *args, method=method)[0]
 
   y0 = [np.pi - 0.1, 0.0]
   ts = np.linspace(0., 1., 11)
@@ -504,21 +508,24 @@ def _max_abs(tensor):
 def _rel_error(true, estimate):
     return _max_abs((true - estimate) / true)
 
-def const_test(method):
+def const_test(**kwargs):
   a = 0.2
   b = 3.
   f = lambda y, t: a + (y - (a * t + b)) ** 5
   exact = lambda t: a * t + b
 
-  t_points = np.linspace(1, 50, 10)
+  t_points = np.linspace(1, 8, 2)
   sol = exact(t_points)
   y0 = sol[0]
-  ys, nfe = odeint(f, y0, t_points, method=method)
-  sc_ys, infodict = osp_integrate.odeint(f, onp.array(y0), onp.array(t_points), full_output=True)
+  ys, nfe = odeint(f, y0, t_points, **kwargs)
+  sc_ys, infodict = osp_integrate.odeint(f, onp.array(y0), onp.array(t_points),
+                                         full_output=True,
+                                         rtol=kwargs["rtol"],
+                                         atol=kwargs["atol"])
   sc_nfe = infodict["nfe"][-1]
   print("Constant\t(abs, rel, nfe, sc_nfe)\t%.4e, %.4e, %d, %d" % (_max_abs(sol - ys), _rel_error(sol, ys), nfe, sc_nfe))
 
-def linear_test(method):
+def linear_test(**kwargs):
   dim = 10
   rng = jax.random.PRNGKey(0)
   U = jax.random.normal(rng, (dim, dim)) * 0.1
@@ -532,32 +539,42 @@ def linear_test(method):
         ans.append(np.matmul(scipy.linalg.expm(A * t_i), initial_val))
     return np.stack([np.array(ans_) for ans_ in ans]).reshape(len(t), dim)
 
-  t_points = np.linspace(1, 50, 10)
+  t_points = np.linspace(1, 8, 2)
   sol = exact(t_points)
   y0 = sol[0]
-  ys, nfe = odeint(partial(f, np), y0, t_points, method=method)
-  sc_ys, infodict = osp_integrate.odeint(partial(f, onp), onp.array(y0), onp.array(t_points), full_output=True)
+  ys, nfe = odeint(partial(f, np), y0, t_points, **kwargs)
+  sc_ys, infodict = osp_integrate.odeint(partial(f, onp), onp.array(y0), onp.array(t_points),
+                                         full_output=True,
+                                         rtol=kwargs["rtol"],
+                                         atol=kwargs["atol"])
   sc_nfe = infodict["nfe"][-1]
   print("Linear\t\t(abs, rel, nfe, sc_nfe)\t%.4e, %.4e, %d, %d" % (_max_abs(sol - ys), _rel_error(sol, ys), nfe, sc_nfe))
 
-def sin_test(method):
+def sin_test(**kwargs):
   f = lambda np, y, t: 2 * y / t + t**4 * np.sin(2 * t) - t**2 + 4 * t**3
   exact = lambda t: -0.5 * t**4 * np.cos(2 * t) + 0.5 * t**3 * np.sin(2 * t) + 0.25 * t**2 * np.cos(2 * t) - \
                     t**3 + 2 * t**4 + (np.pi - 0.25) * t**2
 
-  t_points = np.linspace(1, 50, 10)
+  t_points = np.linspace(1, 8, 2)
   sol = exact(t_points)
   y0 = sol[0]
-  ys, nfe = odeint(partial(f, np), y0, t_points, method=method)
-  sc_ys, infodict = osp_integrate.odeint(partial(f, onp), onp.array(y0), onp.array(t_points), full_output=True)
+  ys, nfe = odeint(partial(f, np), y0, t_points, **kwargs)
+  sc_ys, infodict = osp_integrate.odeint(partial(f, onp), onp.array(y0), onp.array(t_points),
+                                         full_output=True,
+                                         rtol=kwargs["rtol"],
+                                         atol=kwargs["atol"])
   sc_nfe = infodict["nfe"][-1]
   print("Sine\t\t(abs, rel, nfe, sc_nfe)\t%.4e, %.4e, %d, %d" % (_max_abs(sol - ys), _rel_error(sol, ys), nfe, sc_nfe))
 
 if __name__ == '__main__':
-  method = "adams"
-  const_test(method)
-  linear_test(method)
-  sin_test(method)
-  # pend_benchmark_odeint(method)
-  # pend_check_grads(method)
-  print("method\t\t", method)
+  kwargs = {
+    "method": "dopri5",
+    "atol": 1e-3,
+    "rtol": 1e-3
+  }
+  const_test(**kwargs)
+  linear_test(**kwargs)
+  sin_test(**kwargs)
+  pend_benchmark_odeint(**kwargs)
+  pend_check_grads(kwargs["method"])
+  print("method\t\t", kwargs["method"])
