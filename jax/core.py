@@ -449,7 +449,18 @@ class Tracer(object):
         return attr
 
   def __repr__(self):
-    return 'Traced<{}>with<{}>'.format(self.aval, self._trace)
+    base = pp('Traced<{}>with<{}>'.format(self.aval, self._trace))
+    contents = self._contents()
+    if contents:
+      base += pp('  with ') >> vcat(pp('{} = '.format(name)) >> pp_payload
+                                    for name, pp_payload in contents)
+    return str(base)
+
+  def _contents(self):
+    try:
+      return [(name, pp(repr(getattr(self, name)))) for name in self.__slots__]
+    except AttributeError:
+      return ()
 
   def __copy__(self):
     return self
@@ -541,6 +552,16 @@ class TraceState(threading.local):
     new.initial_style = self.initial_style
     return new
 trace_state = TraceState()
+
+def reset_trace_state() -> bool:
+  "Reset the global trace state and return True if it was already clean."
+  if (trace_state.substack != [Sublevel(0)] or
+      trace_state.trace_stack.downward or
+      trace_state.trace_stack.upward):
+    trace_state.__init__()  # type: ignore
+    return False
+  else:
+    return True
 
 def cur_sublevel() -> Sublevel:
   return trace_state.substack[-1]
