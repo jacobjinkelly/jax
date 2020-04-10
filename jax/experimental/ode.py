@@ -289,7 +289,16 @@ def pend_check_grads():
   check_grads(f, (y0, ts, *args), modes=["rev"], order=2,
               atol=1e-1, rtol=1e-1)
 
+def pend_vmap_batch_odeint():
+  def f(y0):
+    return odeint(lambda x, t: np.sin(x), y0, np.array([0., 1.]))
+
+  batched_vmap = jax.vmap(f, in_axes=1, out_axes=-1)
+  y0 = np.ones((3, 1))
+  ys_nfe, ys = batched_vmap(y0)
+  print(ys.shape)
 
 if __name__ == '__main__':
-  pend_benchmark_odeint()
-  pend_check_grads()
+  # pend_benchmark_odeint()
+  # pend_check_grads()
+  pend_vmap_batch_odeint()
