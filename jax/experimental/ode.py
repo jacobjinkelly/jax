@@ -202,6 +202,8 @@ def _odeint_fwd(func, rtol, atol, mxstep, y0, ts, *args):
 def _odeint_rev(func, rtol, atol, mxstep, res, g):
   ys, ts, args = res
 
+  func_vjp = partial(jax.vjp, func)
+
   def aug_dynamics(augmented_state, t, *res):
     """Original system augmented with vjp_y, vjp_t and vjp_args."""
     y, y_bar, *_ = augmented_state
@@ -210,7 +212,7 @@ def _odeint_rev(func, rtol, atol, mxstep, res, g):
     # UnexpectedTracerError exceptions.
     _, ts, args = res
     # `t` here is backwards time from `ts[-1]`, not forwards time.
-    y_dot, vjpfun = jax.vjp(func, y, ts[-1] - t, *args)
+    y_dot, vjpfun = func_vjp(y, ts[-1] - t, *args)
     return (-y_dot, *vjpfun(y_bar))
 
   y_bar = g[-1]

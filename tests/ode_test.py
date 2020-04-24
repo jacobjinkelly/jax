@@ -23,6 +23,9 @@ from jax import dtypes
 from jax import test_util as jtu
 import jax.numpy as np
 from jax.experimental.ode import odeint
+from jax.flatten_util import ravel_pytree
+
+from benchmarks.benchmark import benchmark
 
 import scipy.integrate as osp_integrate
 
@@ -47,6 +50,20 @@ class ODETest(jtu.JaxTestCase):
 
     self.assertAllClose(jax_result, scipy_result, check_dtypes=False, atol=tol, rtol=tol)
 
+  def call_benchmark(self, fun, y0, tspace, *args):
+    integrate = partial(odeint, fun)
+
+    # benchmark forward pass
+    benchmark(lambda: integrate(y0, tspace, *args), name="fwd", warmup=1)
+
+    # benchmark vjp
+    out, vjpfun = jax.vjp(integrate, y0, tspace, *args)
+    rng = onp.random.RandomState(0)
+
+    flat_out, unravel = ravel_pytree(out)
+    cotangent = unravel(jtu.rand_like(rng, flat_out))
+    benchmark(lambda: vjpfun(cotangent), name="bwd", warmup=1)
+
   @jtu.skip_on_devices("tpu")
   def test_pend_grads(self):
     def pend(_np, y, _, m, g):
@@ -61,10 +78,12 @@ class ODETest(jtu.JaxTestCase):
 
     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
 
-    self.scipy_benchmark(pend, y0, ts, *args, tol=tol)
+    self.call_benchmark(partial(pend, np), y0, ts, *args)
 
-    jtu.check_grads(integrate, (y0, ts, *args), modes=["rev"], order=2,
-                    atol=tol, rtol=tol)
+    # self.scipy_benchmark(pend, y0, ts, *args, tol=tol)
+    #
+    # jtu.check_grads(integrate, (y0, ts, *args), modes=["rev"], order=2,
+    #                 atol=tol, rtol=tol)
 
   @jtu.skip_on_devices("tpu")
   def test_weird_time_pendulum_grads(self):
@@ -79,10 +98,12 @@ class ODETest(jtu.JaxTestCase):
 
     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
 
-    self.scipy_benchmark(dynamics, y0, ts, tol=tol)
+    self.call_benchmark(partial(dynamics, np), y0, ts)
 
-    jtu.check_grads(integrate, (y0, ts), modes=["rev"], order=2,
-                    rtol=tol, atol=tol)
+    # self.scipy_benchmark(dynamics, y0, ts, tol=tol)
+    #
+    # jtu.check_grads(integrate, (y0, ts), modes=["rev"], order=2,
+    #                 rtol=tol, atol=tol)
 
   @jtu.skip_on_devices("tpu")
   def test_decay(self):
@@ -99,10 +120,12 @@ class ODETest(jtu.JaxTestCase):
 
     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
 
-    self.scipy_benchmark(decay, y0, ts, *args, tol=tol)
+    self.call_benchmark(partial(decay, np), y0, ts, *args)
 
-    jtu.check_grads(integrate, (y0, ts, *args), modes=["rev"], order=2,
-                    rtol=tol, atol=tol)
+    # self.scipy_benchmark(decay, y0, ts, *args, tol=tol)
+    #
+    # jtu.check_grads(integrate, (y0, ts, *args), modes=["rev"], order=2,
+    #                 rtol=tol, atol=tol)
 
   @jtu.skip_on_devices("tpu")
   def test_swoop(self):
@@ -116,15 +139,17 @@ class ODETest(jtu.JaxTestCase):
 
     y0 = np.linspace(0.1, 0.9, 10)
     args = (0.1, 0.2)
-    self.scipy_benchmark(swoop, y0, ts, *args, tol=tol)
-    jtu.check_grads(integrate, (y0, ts, *args), modes=["rev"], order=2,
-                    rtol=tol, atol=tol)
+    self.call_benchmark(partial(swoop, np), y0, ts, *args)
+    # self.scipy_benchmark(swoop, y0, ts, *args, tol=tol)
+    # jtu.check_grads(integrate, (y0, ts, *args), modes=["rev"], order=2,
+    #                 rtol=tol, atol=tol)
 
     big_y0 = np.linspace(1.1, 10.9, 10)
     args = (0.1, 0.3)
-    self.scipy_benchmark(swoop, y0, ts, *args, tol=tol)
-    jtu.check_grads(integrate, (big_y0, ts, *args), modes=["rev"], order=2,
-                    rtol=tol, atol=tol)
+    self.call_benchmark(partial(swoop, np), y0, ts, *args)
+    # self.scipy_benchmark(swoop, y0, ts, *args, tol=tol)
+    # jtu.check_grads(integrate, (big_y0, ts, *args), modes=["rev"], order=2,
+    #                 rtol=tol, atol=tol)
 
   def test_odeint_vmap_grad(self):
     # https://github.com/google/jax/issues/2531
