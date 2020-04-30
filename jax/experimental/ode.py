@@ -58,6 +58,12 @@ def interp_fit_dopri(y0, y1, k, dt):
   y_mid = y0 + dt * np.dot(dps_c_mid, k)
   return np.array(fit_4th_order_polynomial(y0, y1, y_mid, k[0], k[-1], dt))
 
+def interp_fit_bosh(y0, y1, k, dt):
+    """Fit an interpolating polynomial to the results of a Runge-Kutta step."""
+    bs_c_mid = np.array([0., 0.5, 0., 0.])
+    y_mid = y0 + dt * np.dot(bs_c_mid, k)
+    return np.array(fit_4th_order_polynomial(y0, y1, y_mid, k[0], k[-1], dt))
+
 def fit_4th_order_polynomial(y0, y1, y_mid, dy0, dy1, dt):
   a = -2.*dt*dy0 + 2.*dt*dy1 -  8.*y0 -  8.*y1 + 16.*y_mid
   b =  5.*dt*dy0 - 3.*dt*dy1 + 18.*y0 + 14.*y1 - 32.*y_mid
@@ -110,6 +116,31 @@ def runge_kutta_step(func, y0, f0, t0, dt):
 
   k = ops.index_update(np.zeros((7, f0.shape[0])), ops.index[0, :], f0)
   k = lax.fori_loop(1, 7, body_fun, k)
+
+  y1 = dt * np.dot(c_sol, k) + y0
+  y1_error = dt * np.dot(c_error, k)
+  f1 = k[-1]
+  return y1, f1, y1_error, k
+
+def bosh_step(func, y0, f0, t0, dt):
+  # Bosh tableau
+  alpha = np.array([1/2, 3/4, 1., 0])
+  beta = np.array([
+    [1/2, 0,   0,   0],
+    [0.,  3/4, 0,   0],
+    [2/9, 1/3, 4/9, 0]
+    ])
+  c_sol = np.array([2/9, 1/3, 4/9, 0.])
+  c_error = np.array([2/9-7/24, 1/3-1/4, 4/9-1/3, -1/8])
+
+  def body_fun(i, k):
+    ti = t0 + dt * alpha[i-1]
+    yi = y0 + dt * np.dot(beta[i-1, :], k)
+    ft = func(yi, ti)
+    return ops.index_update(k, jax.ops.index[i, :], ft)
+
+  k = ops.index_update(np.zeros((4, f0.shape[0])), ops.index[0, :], f0)
+  k = lax.fori_loop(1, 4, body_fun, k)
 
   y1 = dt * np.dot(c_sol, k) + y0
   y1_error = dt * np.dot(c_error, k)
@@ -172,10 +203,10 @@ def _odeint(func, rtol, atol, mxstep, y0, ts, *args):
 
     def body_fun(state):
       i, y, f, t, dt, last_t, interp_coeff = state
-      next_y, next_f, next_y_error, k = runge_kutta_step(func_, y, f, t, dt)
+      next_y, next_f, next_y_error, k = bosh_step(func_, y, f, t, dt)
       next_t = t + dt
       error_ratios = error_ratio(next_y_error, rtol, atol, y, next_y)
-      new_interp_coeff = interp_fit_dopri(y, next_y, k, dt)
+      new_interp_coeff = interp_fit_bosh(y, next_y, k, dt)
       dt = optimal_step_size(dt, error_ratios)
 
       new = [i + 1, next_y, next_f, next_t, dt,      t, new_interp_coeff]
