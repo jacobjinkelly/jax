@@ -163,7 +163,7 @@ def optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0,
                       np.minimum(err_ratio**(1.0 / order) / safety, 1.0 / dfactor))
   return np.where(mean_error_ratio == 0, last_step * ifactor, last_step / factor)
 
-def odeint(func, y0, t, *args, rtol=1.4e-8, atol=1.4e-8, mxstep=np.inf):
+def odeint(func, y0, t, *args, rtol=1.4e-15, atol=1.4e-15, mxstep=np.inf):
   """Adaptive stepsize (Dormand-Prince) Runge-Kutta odeint implementation.
 
   Args:
