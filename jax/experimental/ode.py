@@ -255,6 +255,62 @@ def owrenzen_step(func, y0, f0, t0, dt):
   f1 = k[-1]
   return y1, f1, y1_error, k
 
+def cash_karp_step(func, y0, f0, t0, dt):
+  # Cash-Karp tableau
+  alpha = np.array([1/5, 3/10, 3/5, 1, 7/8, 0])
+  beta = np.array([
+    [1/5, 0, 0, 0, 0, 0],
+    [3/40, 9/40, 0, 0, 0, 0],
+    [3/10, -9/10, 6/5, 0, 0, 0],
+    [-11/54, 5/2, -70/27, 35/27, 0, 0],
+    [1631/55296, 175/512, 575/13824, 44275/110592, 253/4096, 0]
+    ])
+  c_sol = np.array([37/378, 0, 250/621, 125/594, 0, 512/1771])
+  c_error = np.array([37/378 - 2825/27648, 0, 250/621 - 18575/48384, 125/594 - 13525/55296, -277/14336, 512/1771 - 1/4])
+
+  def body_fun(i, k):
+    ti = t0 + dt * alpha[i-1]
+    yi = y0 + dt * np.dot(beta[i-1, :], k)
+    ft = func(yi, ti)
+    return ops.index_update(k, jax.ops.index[i, :], ft)
+
+  k = ops.index_update(np.zeros((6, f0.shape[0])), ops.index[0, :], f0)
+  k = lax.fori_loop(1, 6, body_fun, k)
+
+  y1 = dt * np.dot(c_sol, k) + y0
+  y1_error = dt * np.dot(c_error, k)
+  f1 = k[-1]
+  return y1, f1, y1_error, k
+
+def owrenzen5_step(func, y0, f0, t0, dt):
+  # Owrenzen5 tableau
+  alpha = np.array([1/6, 1/4, 1/2, 1/2, 9/14, 7/8, 1, 0])
+  beta = np.array([
+    [1/6, 0, 0, 0, 0, 0, 0, 0],
+    [1/16, 3/16, 0, 0, 0, 0, 0, 0],
+    [1/4, -3/4, 1, 0, 0, 0, 0, 0],
+    [-3/4, 15/4, -3, 1/2, 0, 0, 0, 0],
+    [369/1372, -243/343, 297/343, 1485/9604, 297/4802, 0, 0, 0],
+    [-133/4512, 1113/6016, 7945/16544, -12845/24064, -315/24064, 156065/198528, 0, 0],
+    [83/945, 0, 248/825, 41/180, 1/36, 2401/38610, 6016/20475, 0]
+    ])
+  c_sol = np.array([-1/9 + 188/945, 0, 40/33 - 752/825, -7/4 + 89/45, -1/12 + 1/9, 343/198 - 32242/19305, 6016/20475, 0])
+  c_error = np.array([188/945, 0, -752/825, 89/45, 1/9, -32242/19305, 6016/20475, 0])
+
+  def body_fun(i, k):
+    ti = t0 + dt * alpha[i-1]
+    yi = y0 + dt * np.dot(beta[i-1, :], k)
+    ft = func(yi, ti)
+    return ops.index_update(k, jax.ops.index[i, :], ft)
+
+  k = ops.index_update(np.zeros((8, f0.shape[0])), ops.index[0, :], f0)
+  k = lax.fori_loop(1, 8, body_fun, k)
+
+  y1 = dt * np.dot(c_sol, k) + y0
+  y1_error = dt * np.dot(c_error, k)
+  f1 = k[-1]
+  return y1, f1, y1_error, k
+
 def error_ratio(error_estimate, rtol, atol, y0, y1):
   err_tol = atol + rtol * np.maximum(np.abs(y0), np.abs(y1))
   err_ratio = error_estimate / err_tol
@@ -312,20 +368,20 @@ def _odeint(func, rtol, atol, mxstep, y0, ts, *args):
     def body_fun(state):
       i, y, f, t, dt, last_t, interp_coeff = state
       dt = np.where(t + dt > target_t, target_t - t, dt)
-      next_y, next_f, next_y_error, k = owrenzen_step(func_, y, f, t, dt)
+      next_y, next_f, next_y_error, k = owrenzen5_step(func_, y, f, t, dt)
       next_t = t + dt
       error_ratios = error_ratio(next_y_error, rtol, atol, y, next_y)
-      y_mid, _, _, _ = owrenzen_step(func_, y, f, t, dt / 2)
+      y_mid, _, _, _ = owrenzen5_step(func_, y, f, t, dt / 2)
       new_interp_coeff = np.array(fit_4th_order_polynomial(y0, next_y, y_mid, k[0], k[-1], dt))
       # new_interp_coeff = interp_fit_dopri(y, next_y, k, dt)
-      dt = optimal_step_size(dt, error_ratios, order=4)
+      dt = optimal_step_size(dt, error_ratios, order=5)
 
       new = [i + 1, next_y, next_f, next_t, dt,      t, new_interp_coeff]
       old = [i + 1,      y,      f,      t, dt, last_t,     interp_coeff]
       return map(partial(np.where, np.all(error_ratios <= 1.)), new, old)
 
     _, *carry = lax.while_loop(cond_fun, body_fun, [0] + carry)
-    _, y_target, t, _, last_t, interp_coeff = carry
+    _, _, t, _, last_t, interp_coeff = carry
     relative_output_time = (target_t - last_t) / (t - last_t)
     y_target = np.polyval(interp_coeff, relative_output_time)
     return carry, y_target
