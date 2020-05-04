@@ -56,7 +56,7 @@ class ODETest(jtu.JaxTestCase):
     integrate = partial(odeint, partial(pend, np))
 
     y0 = [np.pi - 0.1, 0.0]
-    ts = np.linspace(0., 1., 11)
+    ts = np.linspace(0., 1., 2)
     args = (0.25, 9.8)
 
     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
@@ -75,7 +75,7 @@ class ODETest(jtu.JaxTestCase):
     integrate = partial(odeint, partial(dynamics, np))
 
     y0 = [np.pi - 0.1, 0.0]
-    ts = np.linspace(0., 1., 11)
+    ts = np.linspace(0., 1., 2)
 
     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
 
@@ -95,7 +95,7 @@ class ODETest(jtu.JaxTestCase):
     args = (rng.randn(3), rng.randn(3))
 
     y0 = rng.randn(3)
-    ts = np.linspace(0.1, 0.2, 4)
+    ts = np.linspace(0.1, 0.2, 2)
 
     tol = 1e-1 if num_float_bits(onp.float64) == 32 else 1e-3
 

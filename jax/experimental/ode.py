@@ -64,6 +64,13 @@ def interp_fit_bosh(y0, y1, k, dt):
     y_mid = y0 + dt * np.dot(bs_c_mid, k)
     return np.array(fit_4th_order_polynomial(y0, y1, y_mid, k[0], k[-1], dt))
 
+def interp_fit_heun(y0, y1, k, dt):
+    """Fit an interpolating polynomial to the results of a Runge-Kutta step."""
+    # from torchdiffeq
+    bs_c_mid = np.array([0.5, 0])
+    y_mid = y0 + dt * np.dot(bs_c_mid, k)
+    return np.array(fit_4th_order_polynomial(y0, y1, y_mid, k[0], k[-1], dt))
+
 def fit_4th_order_polynomial(y0, y1, y_mid, dy0, dy1, dt):
   a = -2.*dt*dy0 + 2.*dt*dy1 -  8.*y0 -  8.*y1 + 16.*y_mid
   b =  5.*dt*dy0 - 3.*dt*dy1 + 18.*y0 + 14.*y1 - 32.*y_mid
@@ -147,6 +154,107 @@ def bosh_step(func, y0, f0, t0, dt):
   f1 = k[-1]
   return y1, f1, y1_error, k
 
+def heun_step(func, y0, f0, t0, dt):
+  # Heun tableau
+  alpha = np.array([1., 0])
+  beta = np.array([
+    [1/2, 0]
+    ])
+  c_sol = np.array([1/2, 1/2])
+  c_error = np.array([1/2 - 1, 1/2])
+
+  def body_fun(i, k):
+    ti = t0 + dt * alpha[i-1]
+    yi = y0 + dt * np.dot(beta[i-1, :], k)
+    ft = func(yi, ti)
+    return ops.index_update(k, jax.ops.index[i, :], ft)
+
+  k = ops.index_update(np.zeros((2, f0.shape[0])), ops.index[0, :], f0)
+  k = lax.fori_loop(1, 2, body_fun, k)
+
+  y1 = dt * np.dot(c_sol, k) + y0
+  y1_error = dt * np.dot(c_error, k)
+  f1 = k[-1]
+  return y1, f1, y1_error, k
+
+def fehlberg_step(func, y0, f0, t0, dt):
+  # Fehlberg tableau
+  alpha = np.array([1/2, 1, 0])
+  beta = np.array([
+    [1/2, 0, 0],
+    [1/256, 255/256, 0]
+    ])
+  c_sol = np.array([1/512, 255/256, 1/512])
+  c_error = np.array([1/512 - 1/256, 0., 1/512])
+
+  def body_fun(i, k):
+    ti = t0 + dt * alpha[i-1]
+    yi = y0 + dt * np.dot(beta[i-1, :], k)
+    ft = func(yi, ti)
+    return ops.index_update(k, jax.ops.index[i, :], ft)
+
+  k = ops.index_update(np.zeros((3, f0.shape[0])), ops.index[0, :], f0)
+  k = lax.fori_loop(1, 3, body_fun, k)
+
+  y1 = dt * np.dot(c_sol, k) + y0
+  y1_error = dt * np.dot(c_error, k)
+  f1 = k[-1]
+  return y1, f1, y1_error, k
+
+def rk_fehlberg_step(func, y0, f0, t0, dt):
+  # Fehlberg tableau
+  alpha = np.array([1/4, 3/8, 12/13, 1, 1/2, 0])
+  beta = np.array([
+    [1/4, 0, 0, 0, 0, 0],
+    [3/32, 9/32, 0, 0, 0, 0],
+    [1932/2197, -7200/2197, 7296/2197, 0, 0, 0],
+    [439/216, -8, 3680/513, -845/4104, 0, 0],
+    [-8/27, 2, -3544/2565, 1859/4104, -11/40, 0]
+    ])
+  c_sol = np.array([16/135, 0, 6656/12825, 28561/56430, -9/50, 2/55])
+  c_error = np.array([16/135 - 25/216, 0, 6656/12825 - 1408/2565, 28561/56430 - 2197/4104, -9/50 - - 1/5, 2/55])
+
+  def body_fun(i, k):
+    ti = t0 + dt * alpha[i-1]
+    yi = y0 + dt * np.dot(beta[i-1, :], k)
+    ft = func(yi, ti)
+    return ops.index_update(k, jax.ops.index[i, :], ft)
+
+  k = ops.index_update(np.zeros((6, f0.shape[0])), ops.index[0, :], f0)
+  k = lax.fori_loop(1, 6, body_fun, k)
+
+  y1 = dt * np.dot(c_sol, k) + y0
+  y1_error = dt * np.dot(c_error, k)
+  f1 = k[-1]
+  return y1, f1, y1_error, k
+
+def owrenzen_step(func, y0, f0, t0, dt):
+  # Owrenzen tableau
+  alpha = np.array([1/6, 11/37, 11/17, 13/15, 1, 0])
+  beta = np.array([
+    [1/6, 0, 0, 0, 0, 0],
+    [44/1369, 363/1369, 0, 0, 0, 0],
+    [3388/4913, -8349/4913, 8140/4913, 0, 0, 0],
+    [-36764/408375, 767/1125, -32708/136125, 210392/408375, 0, 0],
+    [1697/18876, 0, 50653/116160, 299693/1626240, 3375/11648, 0]
+    ])
+  c_sol = np.array([1697/18876, 0, 50653/116160, 299693/1626240, 3375/11648, 0])
+  c_error = np.array([-1185/6292, 0, 4107/7744, -68493/108416, 3375/11648, 0])
+
+  def body_fun(i, k):
+    ti = t0 + dt * alpha[i-1]
+    yi = y0 + dt * np.dot(beta[i-1, :], k)
+    ft = func(yi, ti)
+    return ops.index_update(k, jax.ops.index[i, :], ft)
+
+  k = ops.index_update(np.zeros((6, f0.shape[0])), ops.index[0, :], f0)
+  k = lax.fori_loop(1, 6, body_fun, k)
+
+  y1 = dt * np.dot(c_sol, k) + y0
+  y1_error = dt * np.dot(c_error, k)
+  f1 = k[-1]
+  return y1, f1, y1_error, k
+
 def error_ratio(error_estimate, rtol, atol, y0, y1):
   err_tol = atol + rtol * np.maximum(np.abs(y0), np.abs(y1))
   err_ratio = error_estimate / err_tol
@@ -163,7 +271,7 @@ def optimal_step_size(last_step, mean_error_ratio, safety=0.9, ifactor=10.0,
                       np.minimum(err_ratio**(1.0 / order) / safety, 1.0 / dfactor))
   return np.where(mean_error_ratio == 0, last_step * ifactor, last_step / factor)
 
-def odeint(func, y0, t, *args, rtol=1.4e-15, atol=1.4e-15, mxstep=np.inf):
+def odeint(func, y0, t, *args, rtol=1.4e-8, atol=1.4e-8, mxstep=np.inf):
   """Adaptive stepsize (Dormand-Prince) Runge-Kutta odeint implementation.
 
   Args:
@@ -203,18 +311,21 @@ def _odeint(func, rtol, atol, mxstep, y0, ts, *args):
 
     def body_fun(state):
       i, y, f, t, dt, last_t, interp_coeff = state
-      next_y, next_f, next_y_error, k = bosh_step(func_, y, f, t, dt)
+      dt = np.where(t + dt > target_t, target_t - t, dt)
+      next_y, next_f, next_y_error, k = owrenzen_step(func_, y, f, t, dt)
       next_t = t + dt
       error_ratios = error_ratio(next_y_error, rtol, atol, y, next_y)
-      new_interp_coeff = interp_fit_bosh(y, next_y, k, dt)
-      dt = optimal_step_size(dt, error_ratios)
+      y_mid, _, _, _ = owrenzen_step(func_, y, f, t, dt / 2)
+      new_interp_coeff = np.array(fit_4th_order_polynomial(y0, next_y, y_mid, k[0], k[-1], dt))
+      # new_interp_coeff = interp_fit_dopri(y, next_y, k, dt)
+      dt = optimal_step_size(dt, error_ratios, order=4)
 
       new = [i + 1, next_y, next_f, next_t, dt,      t, new_interp_coeff]
       old = [i + 1,      y,      f,      t, dt, last_t,     interp_coeff]
       return map(partial(np.where, np.all(error_ratios <= 1.)), new, old)
 
     _, *carry = lax.while_loop(cond_fun, body_fun, [0] + carry)
-    _, _, t, _, last_t, interp_coeff = carry
+    _, y_target, t, _, last_t, interp_coeff = carry
     relative_output_time = (target_t - last_t) / (t - last_t)
     y_target = np.polyval(interp_coeff, relative_output_time)
     return carry, y_target
