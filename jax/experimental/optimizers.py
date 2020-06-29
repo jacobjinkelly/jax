@@ -467,9 +467,9 @@ def constant(step_size):
     return step_size
   return schedule
 
-def exponential_decay(step_size, decay_steps, decay_rate):
+def exponential_decay(step_size, decay_steps, decay_rate, lowest=-jnp.inf):
   def schedule(i):
-    return step_size * decay_rate ** (i / decay_steps)
+    return jnp.maximum(step_size * decay_rate ** (i / decay_steps), lowest)
   return schedule
 
 def inverse_time_decay(step_size, decay_steps, decay_rate, staircase=False):
